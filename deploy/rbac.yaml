@@ -39,6 +39,15 @@ subjects:
   - kind: ServiceAccount
     name: go-liga-deployer
     namespace: go-liga
+  # GitHub Actions OIDC subjects. Cluster API server runs with
+  # oidc-issuer-url=https://token.actions.githubusercontent.com,
+  # oidc-username-claim=sub, audience=levinkeller-de.
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: "https://token.actions.githubusercontent.com#repo:levino/go-ranking:ref:refs/heads/main"
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: "https://token.actions.githubusercontent.com#repo:levino/go-ranking:pull_request"
 roleRef:
   kind: Role
   name: go-liga-deployer

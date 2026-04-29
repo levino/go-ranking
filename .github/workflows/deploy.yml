@@ -48,18 +48,23 @@ jobs:
           cache-to: type=gha,mode=max
 
       # ----- Roll out to K3s using GitHub OIDC -----
-      # The cluster is configured to trust GitHub as an OIDC provider,
-      # mapping the workflow identity to the `go-liga-deployer` SA.
-      # No long-lived kubeconfig is required.
+      # k3s API server runs with oidc-issuer-url pointing at GitHub
+      # and oidc-client-id=levinkeller-de. The matching audience is
+      # set on the requested OIDC token below. The User subject this
+      # produces is bound to the go-liga-deployer Role in deploy/rbac.yaml.
       - name: Acquire GitHub OIDC token
-        id: oidc
+        env:
+          KUBE_AUDIENCE: levinkeller-de
         run: |
-          TOKEN=$(curl -sSL \
+          curl -sSL \
             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://kubernetes.default.svc")
-          jq -r .value <<<"$TOKEN" > /tmp/oidc-token
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$KUBE_AUDIENCE" \
+            | jq -r .value > /tmp/oidc-token
 
       - name: Configure kubectl
+        env:
+          KUBE_SERVER: https://server.levinkeller.de:6443
+          KUBE_CA: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJkakNDQVIyZ0F3SUJBZ0lCQURBS0JnZ3Foa2pPUFFRREFqQWpNU0V3SHdZRFZRUUREQmhyTTNNdGMyVnkKZG1WeUxXTmhRREUzTnpVMk16ZzVNall3SGhjTk1qWXdOREE0TURnd01qQTJXaGNOTXpZd05EQTFNRGd3TWpBMgpXakFqTVNFd0h3WURWUVFEREJock0zTXRjMlZ5ZG1WeUxXTmhRREUzTnpVMk16ZzVNall3V1RBVEJnY3Foa2pPClBRSUJCZ2dxaGtqT1BRTUJCd05DQUFSbmFxbG9MLys3RTNJOGh3SS8xcDF1Q1NKalczWmZxdUw2TTJYaEpOK0wKVFh6VkR3Q1RWekk5bjBHZFlwMHVhZ1lIVTFtTk5CaDQ3ZEw0L3h4aXE3YW9vMEl3UURBT0JnTlZIUThCQWY4RQpCQU1DQXFRd0R3WURWUjBUQVFIL0JBVXdBd0VCL3pBZEJnTlZIUTRFRmdRVW5yc3NveDBMWVdDTlRSQkd1Nml2Cm1NM0ljczh3Q2dZSUtvWkl6ajBFQXdJRFJ3QXdSQUlnZlRnTzQ0K3JZck5lUWNDcGpyeXdUdXQ0bFY1TW8vbEMKYW9NczViWUZ4TUlDSUhtU1lIc3JnRW5qZTg3UWhrOG8vRG80ZTVqV3RxNEc5SEtWVCtDZnNtbW8KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
         run: |
           mkdir -p ~/.kube
           cat > ~/.kube/config <<EOF
@@ -68,8 +73,8 @@ jobs:
           clusters:
             - name: k3s
               cluster:
-                server: ${{ secrets.K3S_API_URL }}
-                certificate-authority-data: ${{ secrets.K3S_CA_BASE64 }}
+                server: $KUBE_SERVER
+                certificate-authority-data: $KUBE_CA
           users:
             - name: oidc
               user:
