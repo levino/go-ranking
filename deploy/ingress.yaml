@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: go-liga
+  namespace: go-liga
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - go-liga.example.org
+      secretName: go-liga-tls
+  rules:
+    - host: go-liga.example.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: go-liga
+                port:
+                  number: 80
