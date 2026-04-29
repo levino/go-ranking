@@ -1,0 +1,41 @@
+{{define "content"}}
+<nav class="breadcrumb">
+  <a href="/">Start</a> ·
+  <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> ·
+  <a href="/g/{{.Group.Slug}}/sessions">Sessions</a> ·
+  {{.Session.Passphrase}}
+</nav>
+<h1>{{.Session.Passphrase}}</h1>
+<p class="muted">Erstellt am {{.Session.CreatedAt.Format "02.01.2006 15:04"}}</p>
+<p>
+  <a class="btn" href="/g/{{.Group.Slug}}/sessions/{{.Session.Passphrase}}/matrix.pdf">Vorgabe-Matrix (PDF)</a>
+  <a class="btn" href="/g/{{.Group.Slug}}/sessions/{{.Session.Passphrase}}/scorecard.pdf">Ergebniszettel (PDF)</a>
+</p>
+
+<h2>Spieler in dieser Session</h2>
+<table>
+<tr><th>#</th><th>Name</th><th>GoR (Snapshot)</th></tr>
+{{range .Session.Snapshot}}
+<tr><td>{{.Number}}</td><td>{{.Name}}</td><td>{{printf "%.0f" .GoR}}</td></tr>
+{{end}}
+</table>
+
+<h2>Partien in dieser Session</h2>
+{{if .Games}}
+<table>
+<tr><th>Datum</th><th>Schwarz</th><th>Weiß</th><th>Brett</th><th>Vorgabe</th><th>Komi</th><th>Sieger</th></tr>
+{{range .Games}}
+<tr>
+  <td>{{.PlayedAt.Format "02.01. 15:04"}}</td>
+  <td>{{playerName $.PlayerNames .BlackPlayerID}}</td>
+  <td>{{playerName $.PlayerNames .WhitePlayerID}}</td>
+  <td>{{.BoardSize}}</td>
+  <td>{{.Handicap}}</td>
+  <td>{{printf "%.1f" .Komi}}</td>
+  <td>{{.Winner}}</td>
+</tr>
+{{end}}
+</table>
+{{else}}<p class="muted">Noch keine Partien eingetragen.</p>{{end}}
+{{end}}
+{{template "layout" .}}

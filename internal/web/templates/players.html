@@ -1,0 +1,45 @@
+{{define "content"}}
+<nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · Spieler</nav>
+<h1>Spielerverwaltung</h1>
+
+<h2>Neuer Spieler</h2>
+<form method="post" action="/g/{{.Group.Slug}}/players">
+  <div class="row">
+    <div>
+      <label>Name</label>
+      <input name="name" required>
+    </div>
+    <div>
+      <label>OGS-Rang (optional, z.B. 15k, 1d)</label>
+      <input name="rank" placeholder="leer = 30k">
+    </div>
+  </div>
+  <p><button class="btn" type="submit">Spieler anlegen</button></p>
+</form>
+
+<h2>Bestehende Spieler</h2>
+<table>
+<tr><th>Name</th><th>GoR</th><th>Rang</th><th>Status</th><th></th></tr>
+{{range .Players}}
+<tr>
+  <td>
+    <form method="post" action="/g/{{$.Group.Slug}}/players/{{.ID}}" class="inline">
+      <input name="name" value="{{.Name}}">
+  </td>
+  <td>{{printf "%.0f" .GoR}}</td>
+  <td>{{rank .GoR}}</td>
+  <td>
+      <select name="active">
+        <option value="1" {{if .Active}}selected{{end}}>aktiv</option>
+        <option value="0" {{if not .Active}}selected{{end}}>inaktiv</option>
+      </select>
+  </td>
+  <td>
+      <button class="btn" type="submit">Speichern</button>
+    </form>
+  </td>
+</tr>
+{{end}}
+</table>
+{{end}}
+{{template "layout" .}}

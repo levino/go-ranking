@@ -1,0 +1,91 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write   # required for OIDC trust with the K3s cluster
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----- Build & push image to GHCR -----
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=,format=long
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ----- Roll out to K3s using GitHub OIDC -----
+      # The cluster is configured to trust GitHub as an OIDC provider,
+      # mapping the workflow identity to the `go-liga-deployer` SA.
+      # No long-lived kubeconfig is required.
+      - name: Acquire GitHub OIDC token
+        id: oidc
+        run: |
+          TOKEN=$(curl -sSL \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://kubernetes.default.svc")
+          jq -r .value <<<"$TOKEN" > /tmp/oidc-token
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          cat > ~/.kube/config <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: k3s
+              cluster:
+                server: ${{ secrets.K3S_API_URL }}
+                certificate-authority-data: ${{ secrets.K3S_CA_BASE64 }}
+          users:
+            - name: oidc
+              user:
+                tokenFile: /tmp/oidc-token
+          contexts:
+            - name: deploy
+              context:
+                cluster: k3s
+                user: oidc
+                namespace: go-liga
+          current-context: deploy
+          EOF
+
+      - name: Trigger rollout
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        run: |
+          kubectl set image deployment/go-liga go-liga="$IMAGE"
+          kubectl rollout status deployment/go-liga --timeout=2m

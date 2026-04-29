@@ -1,0 +1,11 @@
+{{define "content"}}
+<h1>Anmelden</h1>
+<form method="post" action="/login">
+  <label>Username</label>
+  <input name="username" required autofocus>
+  <label>Passwort</label>
+  <input name="password" type="password" required>
+  <p><button class="btn" type="submit">Anmelden</button></p>
+</form>
+{{end}}
+{{template "layout" .}}

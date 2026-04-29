@@ -1,0 +1,28 @@
+{{define "content"}}
+<nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · Sessions</nav>
+<h1>Sessions</h1>
+
+<form method="post" action="/g/{{.Group.Slug}}/sessions">
+  <p><button class="btn" type="submit">Neue Session erstellen</button>
+     <span class="muted">— friert die aktuellen GoR-Werte ein.</span></p>
+</form>
+
+{{if .Sessions}}
+<table>
+<tr><th>Passphrase</th><th>Erstellt</th><th>Spieler</th><th>Partien</th><th>PDFs</th></tr>
+{{range .Sessions}}
+<tr>
+  <td><a href="/g/{{$.Group.Slug}}/sessions/{{.Passphrase}}"><strong>{{.Passphrase}}</strong></a></td>
+  <td>{{.CreatedAt.Format "02.01.2006 15:04"}}</td>
+  <td>{{len .Snapshot}}</td>
+  <td>{{index $.GameCounts .ID}}</td>
+  <td>
+    <a class="btn" href="/g/{{$.Group.Slug}}/sessions/{{.Passphrase}}/matrix.pdf">Matrix</a>
+    <a class="btn" href="/g/{{$.Group.Slug}}/sessions/{{.Passphrase}}/scorecard.pdf">Zettel</a>
+  </td>
+</tr>
+{{end}}
+</table>
+{{else}}<p class="muted">Noch keine Sessions.</p>{{end}}
+{{end}}
+{{template "layout" .}}

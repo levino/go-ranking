@@ -1,0 +1,61 @@
+{{define "layout"}}<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>{{.Title}} – Go-Liga</title>
+<style>
+:root { --fg: #222; --bg: #fafafa; --acc: #1c5d99; --muted: #666; --bd: #ddd; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; }
+header { background: #fff; border-bottom: 1px solid var(--bd); padding: .8rem 1.2rem; display:flex; justify-content:space-between; align-items:center; }
+header a { color: var(--acc); text-decoration: none; margin-right: 1rem; }
+main { max-width: 950px; margin: 1.2rem auto; padding: 0 1rem; }
+h1, h2, h3 { color: var(--fg); }
+table { border-collapse: collapse; width: 100%; background: #fff; }
+th, td { padding: .45rem .6rem; border-bottom: 1px solid var(--bd); text-align: left; }
+th { background: #eef2f7; }
+.btn { display:inline-block; padding:.4rem .8rem; background:var(--acc); color:#fff; border:0; border-radius:4px; text-decoration:none; cursor:pointer; font-size:.95rem; }
+.btn.secondary { background:#888; }
+.btn.danger { background:#c0392b; }
+form.inline { display:inline; }
+.flash { padding:.6rem 1rem; margin:1rem 0; border-radius:4px; background:#fff8c4; border:1px solid #e0d27a; }
+.flash.error { background:#fde2e2; border-color:#d99; }
+input, select { padding:.35rem .5rem; border:1px solid var(--bd); border-radius:3px; font-size: 1rem; }
+label { display:block; margin:.6rem 0 .2rem; }
+.muted { color: var(--muted); }
+nav.breadcrumb { font-size:.9rem; margin-bottom: 1rem; color: var(--muted); }
+nav.breadcrumb a { color: var(--acc); text-decoration: none; }
+.row { display:flex; gap:1rem; flex-wrap:wrap; }
+.row > * { flex:1 1 0; }
+.kpi { background:#fff; border:1px solid var(--bd); border-radius:6px; padding:.8rem 1rem; }
+.kpi .v { font-size:1.6rem; font-weight:700; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <a href="/"><strong>Go-Liga</strong></a>
+    {{if .User}}
+      {{if .Group}}<a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a>{{end}}
+      {{if .Group}}<a href="/g/{{.Group.Slug}}/players">Spieler</a>{{end}}
+      {{if .Group}}<a href="/g/{{.Group.Slug}}/sessions">Sessions</a>{{end}}
+    {{end}}
+  </div>
+  <div>
+    {{if .User}}
+      <span class="muted">{{.User.Username}}</span>
+      <form action="/logout" method="post" class="inline">
+        <button class="btn secondary" type="submit">Logout</button>
+      </form>
+    {{else}}
+      <a class="btn" href="/login">Login</a>
+    {{end}}
+  </div>
+</header>
+<main>
+  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+  {{if .Error}}<div class="flash error">{{.Error}}</div>{{end}}
+  {{block "content" .}}{{end}}
+</main>
+</body>
+</html>{{end}}

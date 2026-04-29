@@ -1,0 +1,17 @@
+{{define "content"}}
+<h1>Go-Liga</h1>
+{{if .User.IsAdmin}}
+  <p>Angemeldet als Administrator. <a href="/admin">Admin-Bereich</a></p>
+{{end}}
+<h2>Gruppen</h2>
+{{if .Groups}}
+<ul>
+{{range .Groups}}
+  <li><a href="/g/{{.Slug}}">{{.Name}}</a></li>
+{{end}}
+</ul>
+{{else}}
+<p class="muted">Keine Gruppen vorhanden.</p>
+{{end}}
+{{end}}
+{{template "layout" .}}

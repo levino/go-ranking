@@ -1,0 +1,46 @@
+{{define "content"}}
+<nav class="breadcrumb"><a href="/">Start</a> · {{.Group.Name}}</nav>
+<h1>{{.Group.Name}}</h1>
+<div class="row">
+  <div class="kpi"><div class="muted">Spieler</div><div class="v">{{len .Players}}</div></div>
+  <div class="kpi"><div class="muted">Sessions</div><div class="v">{{.SessionCount}}</div></div>
+  <div class="kpi"><div class="muted">Partien gesamt</div><div class="v">{{.GameCount}}</div></div>
+</div>
+
+<h2>Rangliste</h2>
+{{if .Players}}
+<table>
+<tr><th>#</th><th>Name</th><th>GoR</th><th>Rang</th><th>Status</th></tr>
+{{range $i, $p := .Players}}
+<tr>
+  <td>{{add $i 1}}</td>
+  <td>{{$p.Name}}</td>
+  <td>{{printf "%.0f" $p.GoR}}</td>
+  <td>{{rank $p.GoR}}</td>
+  <td>{{if $p.Active}}aktiv{{else}}inaktiv{{end}}</td>
+</tr>
+{{end}}
+</table>
+{{else}}<p class="muted">Noch keine Spieler.</p>{{end}}
+
+<h2>Letzte Partien</h2>
+{{if .RecentGames}}
+<table>
+<tr><th>Datum</th><th>Schwarz</th><th>Weiß</th><th>Brett</th><th>Vorgabe</th><th>Komi</th><th>Sieger</th><th>Δ Schwarz</th><th>Δ Weiß</th></tr>
+{{range .RecentGames}}
+<tr>
+  <td>{{.PlayedAt.Format "02.01. 15:04"}}</td>
+  <td>{{playerName $.PlayerNames .BlackPlayerID}}</td>
+  <td>{{playerName $.PlayerNames .WhitePlayerID}}</td>
+  <td>{{.BoardSize}}</td>
+  <td>{{.Handicap}}</td>
+  <td>{{printf "%.1f" .Komi}}</td>
+  <td>{{.Winner}}</td>
+  <td>{{printf "%+.1f" (sub .BlackGoRAfter .BlackGoRBefore)}}</td>
+  <td>{{printf "%+.1f" (sub .WhiteGoRAfter .WhiteGoRBefore)}}</td>
+</tr>
+{{end}}
+</table>
+{{else}}<p class="muted">Noch keine Partien.</p>{{end}}
+{{end}}
+{{template "layout" .}}
