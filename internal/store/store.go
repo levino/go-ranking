@@ -36,7 +36,95 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
-	return &Store{DB: db}, nil
+	s := &Store{DB: db}
+	if err := s.migrate(context.Background()); err != nil {
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	return s, nil
+}
+
+// migrate handles the v1 → v2 transition: drops the legacy `sessions`
+// table and rebuilds `games` without `session_id`, carrying the
+// existing rows' group via the join. Idempotent.
+func (s *Store) migrate(ctx context.Context) error {
+	// Inspect the games table's columns.
+	var hasSessionID, hasGroupID bool
+	rows, err := s.DB.QueryContext(ctx, "PRAGMA table_info(games)")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		switch name {
+		case "session_id":
+			hasSessionID = true
+		case "group_id":
+			hasGroupID = true
+		}
+	}
+	rows.Close()
+	if !hasSessionID || hasGroupID {
+		return nil // already on the new schema
+	}
+
+	var sessExists int
+	_ = s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sessions'`).
+		Scan(&sessExists)
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE games_new (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			group_id         INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			black_player_id  INTEGER NOT NULL REFERENCES players(id),
+			white_player_id  INTEGER NOT NULL REFERENCES players(id),
+			board_size       INTEGER NOT NULL,
+			handicap         INTEGER NOT NULL,
+			komi             REAL NOT NULL,
+			winner           TEXT NOT NULL CHECK (winner IN ('black','white')),
+			black_gor_before REAL NOT NULL,
+			white_gor_before REAL NOT NULL,
+			black_gor_after  REAL NOT NULL,
+			white_gor_after  REAL NOT NULL,
+			played_at        TEXT NOT NULL DEFAULT (datetime('now'))
+		)`); err != nil {
+		return err
+	}
+	if sessExists == 1 {
+		// Recover group_id via the session join. Existing rows survive.
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO games_new (id, group_id, black_player_id, white_player_id,
+			    board_size, handicap, komi, winner,
+			    black_gor_before, white_gor_before, black_gor_after, white_gor_after, played_at)
+			SELECT g.id, s.group_id, g.black_player_id, g.white_player_id,
+			       g.board_size, g.handicap, g.komi, g.winner,
+			       g.black_gor_before, g.white_gor_before, g.black_gor_after, g.white_gor_after, g.played_at
+			  FROM games g JOIN sessions s ON g.session_id = s.id`); err != nil {
+			return err
+		}
+	}
+	// If sessions are gone we drop existing rows — the prod DB has none.
+	if _, err := tx.ExecContext(ctx, `DROP TABLE games; ALTER TABLE games_new RENAME TO games; DROP TABLE IF EXISTS sessions`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX idx_games_group ON games(group_id);
+	                                  CREATE INDEX idx_games_black ON games(black_player_id);
+	                                  CREATE INDEX idx_games_white ON games(white_player_id);`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) Close() error { return s.DB.Close() }
