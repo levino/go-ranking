@@ -477,6 +477,103 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (*User, error) {
 	return u, nil
 }
 
+// ---- OAuth (Authorization Server state) ----------------------------------
+
+type OAuthClient struct {
+	ClientID     string
+	ClientName   string
+	RedirectURIs []string
+	CreatedAt    time.Time
+}
+
+func (s *Store) CreateOAuthClient(ctx context.Context, clientID, name string, redirectURIs []string) error {
+	raw, err := json.Marshal(redirectURIs)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx,
+		`INSERT INTO oauth_clients(client_id,client_name,redirect_uris) VALUES(?,?,?)`,
+		clientID, name, string(raw))
+	return err
+}
+
+func (s *Store) OAuthClient(ctx context.Context, clientID string) (*OAuthClient, error) {
+	c := &OAuthClient{}
+	var uris, created string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT client_id,client_name,redirect_uris,created_at FROM oauth_clients WHERE client_id=?`,
+		clientID).Scan(&c.ClientID, &c.ClientName, &uris, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(uris), &c.RedirectURIs); err != nil {
+		return nil, fmt.Errorf("bad redirect_uris: %w", err)
+	}
+	c.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	return c, nil
+}
+
+// SaveAuthCode persists a single-use authorization code with a PKCE
+// challenge. expires_at is RFC 3339.
+func (s *Store) SaveAuthCode(ctx context.Context, code, clientID string, userID int64, redirectURI, codeChallenge string, expiresAt time.Time) error {
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT INTO oauth_codes(code,client_id,user_id,redirect_uri,code_challenge,expires_at)
+		 VALUES(?,?,?,?,?,?)`,
+		code, clientID, userID, redirectURI, codeChallenge,
+		expiresAt.UTC().Format("2006-01-02 15:04:05"))
+	return err
+}
+
+type AuthCode struct {
+	Code          string
+	ClientID      string
+	UserID        int64
+	RedirectURI   string
+	CodeChallenge string
+	ExpiresAt     time.Time
+}
+
+// ConsumeAuthCode atomically marks a code as used and returns it. If
+// the code is missing, already consumed, or expired, returns ErrNotFound.
+func (s *Store) ConsumeAuthCode(ctx context.Context, code string) (*AuthCode, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	ac := &AuthCode{}
+	var expires string
+	var consumed int
+	err = tx.QueryRowContext(ctx,
+		`SELECT code,client_id,user_id,redirect_uri,code_challenge,expires_at,consumed
+		   FROM oauth_codes WHERE code=?`, code).
+		Scan(&ac.Code, &ac.ClientID, &ac.UserID, &ac.RedirectURI, &ac.CodeChallenge, &expires, &consumed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if consumed != 0 {
+		return nil, ErrNotFound
+	}
+	ac.ExpiresAt, _ = time.Parse("2006-01-02 15:04:05", expires)
+	if time.Now().UTC().After(ac.ExpiresAt) {
+		return nil, ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE oauth_codes SET consumed=1 WHERE code=?`, code); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ac, nil
+}
+
 // ---- Group admins (M:N) --------------------------------------------------
 
 func (s *Store) AddGroupAdmin(ctx context.Context, userID, groupID int64) error {
