@@ -234,16 +234,32 @@ func TestTabletPlayFlow(t *testing.T) {
 		t.Fatalf("expected 3 players after add, got %d", len(all))
 	}
 
-	// Record a game
-	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/record", url.Values{
+	// Record a game — preview step renders 200 with the confirmation
+	// page (no DB write).
+	form := url.Values{
 		"black": {fmt.Sprintf("%d", ben.ID)}, "white": {fmt.Sprintf("%d", anna.ID)},
 		"board": {"13"}, "handicap": {"4"}, "winner": {"black"},
-	})
+	}
+	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/record", form)
+	previewBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("record_game form: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("record_game preview: %d body %s", resp.StatusCode, previewBody)
+	}
+	if !bytes.Contains(previewBody, []byte("Ja, eintragen")) {
+		t.Errorf("preview page missing confirm button: %s", previewBody)
 	}
 	games, _ := rg.svc.Store.ListRecentGames(context.Background(), g.ID, 10)
+	if len(games) != 0 {
+		t.Fatalf("preview must not write to DB, but got %d games", len(games))
+	}
+	// Commit step — POST the same fields to /confirm, expect 302 + DB write.
+	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/record/confirm", form)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("record_game commit: %d", resp.StatusCode)
+	}
+	games, _ = rg.svc.Store.ListRecentGames(context.Background(), g.ID, 10)
 	if len(games) != 1 {
 		t.Fatalf("expected 1 game, got %d", len(games))
 	}
