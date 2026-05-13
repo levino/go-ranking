@@ -367,8 +367,11 @@ func TestOAuthAuthorizationServerMetadata(t *testing.T) {
 
 func TestDocsRenders(t *testing.T) {
 	rg := newRig(t)
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
 	// /docs redirects to the first page.
-	resp, err := http.Get(rg.srv.URL + "/docs")
+	resp, err := noRedirect.Get(rg.srv.URL + "/docs")
 	if err != nil {
 		t.Fatal(err)
 	}
