@@ -140,34 +140,92 @@ func TestSessionAndGames(t *testing.T) {
 	}
 }
 
-func TestUserCRUDAndAdminFlag(t *testing.T) {
+func TestUserUpsertByOIDC(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 
-	if any, _ := st.HasAnyUsers(ctx); any {
-		t.Fatal("fresh DB must report no users")
-	}
-
-	if _, err := st.CreateUser(ctx, "admin", "hash", nil, true); err != nil {
-		t.Fatal(err)
-	}
-	if any, _ := st.HasAnyUsers(ctx); !any {
-		t.Fatal("expected users after create")
-	}
-
-	g, _ := st.CreateGroup(ctx, "s", "S")
-	if _, err := st.CreateUser(ctx, "teacher", "hash", &g.ID, false); err != nil {
-		t.Fatal(err)
-	}
-
-	u, err := st.UserByUsername(ctx, "teacher")
+	u1, err := st.UpsertUserByOIDC(ctx, "sub-1", "alice@example.com", "Alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !u.GroupID.Valid || u.GroupID.Int64 != g.ID {
-		t.Fatal("teacher group not set")
+	if u1.ID == 0 || u1.Email != "alice@example.com" || u1.Name != "Alice" {
+		t.Fatalf("bad user: %+v", u1)
 	}
-	if u.IsAdmin {
-		t.Fatal("teacher must not be admin")
+
+	// Second call with same subject updates email/name in place.
+	u2, err := st.UpsertUserByOIDC(ctx, "sub-1", "alice2@example.com", "Alice II")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u2.ID != u1.ID {
+		t.Fatalf("upsert created a new row: %d vs %d", u1.ID, u2.ID)
+	}
+	if u2.Email != "alice2@example.com" || u2.Name != "Alice II" {
+		t.Fatalf("upsert did not refresh fields: %+v", u2)
+	}
+
+	got, err := st.UserByEmail(ctx, "alice2@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != u1.ID {
+		t.Fatalf("UserByEmail returned wrong row")
+	}
+}
+
+func TestGroupAdminsMembership(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	g1, _ := st.CreateGroup(ctx, "g1", "G1")
+	g2, _ := st.CreateGroup(ctx, "g2", "G2")
+	u1, _ := st.UpsertUserByOIDC(ctx, "u1", "u1@example.com", "U1")
+	u2, _ := st.UpsertUserByOIDC(ctx, "u2", "u2@example.com", "U2")
+
+	if err := st.AddGroupAdmin(ctx, u1.ID, g1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddGroupAdmin(ctx, u1.ID, g2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddGroupAdmin(ctx, u2.ID, g1.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Idempotent: re-adding is a no-op.
+	if err := st.AddGroupAdmin(ctx, u1.ID, g1.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := st.IsGroupAdmin(ctx, u1.ID, g1.ID)
+	if err != nil || !ok {
+		t.Fatalf("u1 should admin g1: %v %v", ok, err)
+	}
+	ok, _ = st.IsGroupAdmin(ctx, u2.ID, g2.ID)
+	if ok {
+		t.Fatal("u2 should NOT admin g2")
+	}
+
+	groups, err := st.ListAdminGroups(ctx, u1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("u1 admins 2 groups, got %d", len(groups))
+	}
+
+	admins, err := st.ListGroupAdmins(ctx, g1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(admins) != 2 {
+		t.Fatalf("g1 has 2 admins, got %d", len(admins))
+	}
+
+	if err := st.RemoveGroupAdmin(ctx, u2.ID, g1.ID); err != nil {
+		t.Fatal(err)
+	}
+	admins, _ = st.ListGroupAdmins(ctx, g1.ID)
+	if len(admins) != 1 || admins[0].ID != u1.ID {
+		t.Fatalf("removal failed: %+v", admins)
 	}
 }

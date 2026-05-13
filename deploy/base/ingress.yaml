@@ -20,10 +20,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - go-ranking.levinkeller.de
+        - ranking.go-ag.levinkeller.de
       secretName: go-liga-tls
   rules:
-    - host: go-ranking.levinkeller.de
+    - host: ranking.go-ag.levinkeller.de
       http:
         paths:
           - path: /

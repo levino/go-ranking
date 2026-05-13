@@ -25,15 +25,19 @@ var tmplFS embed.FS
 type Server struct {
 	Service *service.Service
 	Signer  *auth.Signer
+	OIDC    *auth.OIDC
 	tmpls   map[string]*template.Template
 }
 
 type ctxKey string
 
-const userKey ctxKey = "user"
+const (
+	userKey      ctxKey = "user"
+	oidcStateCookie       = "go_liga_oidc_state"
+)
 
-func New(s *service.Service, signer *auth.Signer) (*Server, error) {
-	srv := &Server{Service: s, Signer: signer}
+func New(s *service.Service, signer *auth.Signer, oidc *auth.OIDC) (*Server, error) {
+	srv := &Server{Service: s, Signer: signer, OIDC: oidc}
 	if err := srv.loadTemplates(); err != nil {
 		return nil, err
 	}
@@ -70,23 +74,25 @@ func (s *Server) loadTemplates() error {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
-	mux.HandleFunc("GET /login", s.handleLoginGET)
-	mux.HandleFunc("POST /login", s.handleLoginPOST)
+	mux.HandleFunc("GET /login", s.handleLoginPage)
+	mux.HandleFunc("GET /auth/start", s.handleAuthStart)
+	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	mux.HandleFunc("POST /logout", s.handleLogout)
 
-	mux.HandleFunc("GET /admin", s.requireAdmin(s.handleAdmin))
-	mux.HandleFunc("POST /admin/groups", s.requireAdmin(s.handleAdminCreateGroup))
-	mux.HandleFunc("POST /admin/users", s.requireAdmin(s.handleAdminCreateUser))
+	mux.HandleFunc("POST /groups", s.requireUser(s.handleCreateGroup))
 
-	mux.HandleFunc("GET /g/{slug}", s.requireGroup(s.handleDashboard))
-	mux.HandleFunc("GET /g/{slug}/players", s.requireGroup(s.handlePlayersGET))
-	mux.HandleFunc("POST /g/{slug}/players", s.requireGroup(s.handlePlayersPOST))
-	mux.HandleFunc("POST /g/{slug}/players/{id}", s.requireGroup(s.handlePlayerUpdate))
-	mux.HandleFunc("GET /g/{slug}/sessions", s.requireGroup(s.handleSessionsGET))
-	mux.HandleFunc("POST /g/{slug}/sessions", s.requireGroup(s.handleSessionsPOST))
-	mux.HandleFunc("GET /g/{slug}/sessions/{pass}", s.requireGroup(s.handleSessionShow))
-	mux.HandleFunc("GET /g/{slug}/sessions/{pass}/matrix.pdf", s.requireGroup(s.handleMatrixPDF))
-	mux.HandleFunc("GET /g/{slug}/sessions/{pass}/scorecard.pdf", s.requireGroup(s.handleScoreCardPDF))
+	mux.HandleFunc("GET /g/{slug}", s.requireGroupAdmin(s.handleDashboard))
+	mux.HandleFunc("GET /g/{slug}/admins", s.requireGroupAdmin(s.handleAdminsGET))
+	mux.HandleFunc("POST /g/{slug}/admins/add", s.requireGroupAdmin(s.handleAdminAdd))
+	mux.HandleFunc("POST /g/{slug}/admins/remove", s.requireGroupAdmin(s.handleAdminRemove))
+	mux.HandleFunc("GET /g/{slug}/players", s.requireGroupAdmin(s.handlePlayersGET))
+	mux.HandleFunc("POST /g/{slug}/players", s.requireGroupAdmin(s.handlePlayersPOST))
+	mux.HandleFunc("POST /g/{slug}/players/{id}", s.requireGroupAdmin(s.handlePlayerUpdate))
+	mux.HandleFunc("GET /g/{slug}/sessions", s.requireGroupAdmin(s.handleSessionsGET))
+	mux.HandleFunc("POST /g/{slug}/sessions", s.requireGroupAdmin(s.handleSessionsPOST))
+	mux.HandleFunc("GET /g/{slug}/sessions/{pass}", s.requireGroupAdmin(s.handleSessionShow))
+	mux.HandleFunc("GET /g/{slug}/sessions/{pass}/matrix.pdf", s.requireGroupAdmin(s.handleMatrixPDF))
+	mux.HandleFunc("GET /g/{slug}/sessions/{pass}/scorecard.pdf", s.requireGroupAdmin(s.handleScoreCardPDF))
 
 	return s.withAuth(mux)
 }
@@ -100,7 +106,8 @@ type pageContext struct {
 	Flash  string
 	Error  string
 	Groups []store.Group
-	// per-page extras filled in via embedding
+	Admins []store.User
+	// per-page extras
 	Players      []store.Player
 	Sessions     []store.Session
 	Session      *store.Session
@@ -133,22 +140,17 @@ func userOf(r *http.Request) *store.User {
 	return u
 }
 
-func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
+func (s *Server) requireUser(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		u := userOf(r)
-		if u == nil {
+		if userOf(r) == nil {
 			http.Redirect(w, r, "/login", http.StatusFound)
-			return
-		}
-		if !u.IsAdmin {
-			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		h(w, r)
 	}
 }
 
-func (s *Server) requireGroup(h func(w http.ResponseWriter, r *http.Request, g *store.Group)) http.HandlerFunc {
+func (s *Server) requireGroupAdmin(h func(w http.ResponseWriter, r *http.Request, g *store.Group)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u := userOf(r)
 		if u == nil {
@@ -161,7 +163,12 @@ func (s *Server) requireGroup(h func(w http.ResponseWriter, r *http.Request, g *
 			http.NotFound(w, r)
 			return
 		}
-		if !u.IsAdmin && (!u.GroupID.Valid || u.GroupID.Int64 != g.ID) {
+		ok, err := s.Service.Store.IsGroupAdmin(r.Context(), u.ID, g.ID)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if !ok {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -189,38 +196,81 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
-	if !u.IsAdmin && u.GroupID.Valid {
-		// Per-group user goes straight to their dashboard.
-		g, err := s.Service.Store.GroupByID(r.Context(), u.GroupID.Int64)
-		if err == nil {
-			http.Redirect(w, r, "/g/"+g.Slug, http.StatusFound)
-			return
-		}
+	groups, err := s.Service.Store.ListAdminGroups(r.Context(), u.ID)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
 	}
-	groups, _ := s.Service.Store.ListGroups(r.Context())
 	s.render(w, "index", pageContext{Title: "Start", User: u, Groups: groups})
 }
 
-func (s *Server) handleLoginGET(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	if userOf(r) != nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
 	s.render(w, "login", pageContext{Title: "Anmelden"})
 }
 
-func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	u, err := s.Service.Store.UserByUsername(r.Context(), r.FormValue("username"))
+func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
+	state := auth.RandomState()
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcStateCookie,
+		Value:    state,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   300, // 5 min to complete the flow
+	})
+	url, err := s.OIDC.AuthURL(r.Context(), state)
 	if err != nil {
-		s.render(w, "login", pageContext{Title: "Anmelden", Error: "Ungültige Anmeldedaten."})
+		http.Error(w, "OIDC discovery failed: "+err.Error(), 500)
 		return
 	}
-	ok, err := auth.VerifyPassword(r.FormValue("password"), u.PasswordHash)
-	if err != nil || !ok {
-		s.render(w, "login", pageContext{Title: "Anmelden", Error: "Ungültige Anmeldedaten."})
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
+	if errStr := r.URL.Query().Get("error"); errStr != "" {
+		http.Error(w, "OIDC error: "+errStr, 400)
 		return
 	}
-	if err := s.Signer.Issue(w, u.ID, 30*24*time.Hour); err != nil {
+	cookie, err := r.Cookie(oidcStateCookie)
+	if err != nil {
+		http.Error(w, "missing state cookie", 400)
+		return
+	}
+	if r.URL.Query().Get("state") != cookie.Value {
+		http.Error(w, "state mismatch", 400)
+		return
+	}
+	// Clear the state cookie now that we've checked it.
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcStateCookie,
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "missing code", 400)
+		return
+	}
+	ui, err := s.OIDC.Exchange(r.Context(), code)
+	if err != nil {
+		http.Error(w, "token exchange failed: "+err.Error(), 500)
+		return
+	}
+	user, err := s.Service.Store.UpsertUserByOIDC(r.Context(), ui.Subject, ui.Email, ui.DisplayName())
+	if err != nil {
+		http.Error(w, "user upsert failed: "+err.Error(), 500)
+		return
+	}
+	if err := s.Signer.Issue(w, user.ID, 30*24*time.Hour); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -229,65 +279,95 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.Signer.Clear(w)
+	logoutURL, _ := s.OIDC.LogoutURL(r.Context(), "https://ranking.go-ag.levinkeller.de/login")
+	if logoutURL != "" {
+		http.Redirect(w, r, logoutURL, http.StatusFound)
+		return
+	}
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
-func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	u := userOf(r)
-	groups, _ := s.Service.Store.ListGroups(r.Context())
-	s.render(w, "admin", pageContext{Title: "Admin", User: u, Groups: groups})
-}
-
-func (s *Server) handleAdminCreateGroup(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
+	slug := r.FormValue("slug")
 	name := r.FormValue("name")
-	if name == "" {
-		http.Error(w, "name required", 400)
+	if slug == "" || name == "" {
+		http.Error(w, "slug and name required", 400)
 		return
 	}
-	if _, err := s.Service.CreateGroup(r.Context(), name); err != nil {
+	g, err := s.Service.CreateGroupWithSlug(r.Context(), slug, name)
+	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	http.Redirect(w, r, "/admin", http.StatusFound)
+	if err := s.Service.Store.AddGroupAdmin(r.Context(), u.ID, g.ID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	http.Redirect(w, r, "/g/"+g.Slug, http.StatusFound)
 }
 
-func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	username := r.FormValue("username")
-	password := r.FormValue("password")
-	gidStr := r.FormValue("group_id")
-	if username == "" || password == "" {
-		http.Error(w, "username and password required", 400)
-		return
-	}
-	hash, err := auth.HashPassword(password)
+func (s *Server) handleAdminsGET(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	admins, err := s.Service.Store.ListGroupAdmins(r.Context(), g.ID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	var gid *int64
-	isAdmin := true
-	if gidStr != "" {
-		v, err := strconv.ParseInt(gidStr, 10, 64)
-		if err != nil {
-			http.Error(w, "bad group_id", 400)
-			return
-		}
-		gid = &v
-		isAdmin = false
-	}
-	if _, err := s.Service.Store.CreateUser(r.Context(), username, hash, gid, isAdmin); err != nil {
+	s.render(w, "admin", pageContext{Title: g.Name + " — Admins", User: userOf(r), Group: g, Admins: admins})
+}
+
+func (s *Server) handleAdminAdd(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	http.Redirect(w, r, "/admin", http.StatusFound)
+	email := r.FormValue("email")
+	if email == "" {
+		http.Error(w, "email required", 400)
+		return
+	}
+	target, err := s.Service.Store.UserByEmail(r.Context(), email)
+	if err != nil {
+		http.Error(w, "user with that email has not logged in yet", 404)
+		return
+	}
+	if err := s.Service.Store.AddGroupAdmin(r.Context(), target.ID, g.ID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	http.Redirect(w, r, "/g/"+g.Slug+"/admins", http.StatusFound)
+}
+
+func (s *Server) handleAdminRemove(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	uidStr := r.FormValue("user_id")
+	uid, err := strconv.ParseInt(uidStr, 10, 64)
+	if err != nil {
+		http.Error(w, "bad user_id", 400)
+		return
+	}
+	me := userOf(r)
+	if uid == me.ID {
+		// Prevent locking yourself out: only allow if there's at least
+		// one other admin left.
+		admins, _ := s.Service.Store.ListGroupAdmins(r.Context(), g.ID)
+		if len(admins) <= 1 {
+			http.Error(w, "cannot remove the last admin of a group", 400)
+			return
+		}
+	}
+	if err := s.Service.Store.RemoveGroupAdmin(r.Context(), uid, g.ID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	http.Redirect(w, r, "/g/"+g.Slug+"/admins", http.StatusFound)
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -458,4 +538,3 @@ func (s *Server) lookupSession(r *http.Request, g *store.Group) (*store.Session,
 	}
 	return sess, nil
 }
-

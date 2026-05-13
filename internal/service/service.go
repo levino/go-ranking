@@ -30,6 +30,20 @@ func (s *Service) CreateGroup(ctx context.Context, name string) (*store.Group, e
 	return s.Store.CreateGroup(ctx, slug, name)
 }
 
+// CreateGroupWithSlug creates a group using a caller-supplied slug.
+// The slug is normalized lightly (lowercase, hyphens only) to avoid
+// surprises in URLs.
+func (s *Service) CreateGroupWithSlug(ctx context.Context, slug, name string) (*store.Group, error) {
+	s2 := slugify(slug)
+	if s2 == "" {
+		return nil, errors.New("invalid slug")
+	}
+	if strings.TrimSpace(name) == "" {
+		return nil, errors.New("name required")
+	}
+	return s.Store.CreateGroup(ctx, s2, name)
+}
+
 // CreateSession freezes a snapshot of the group's active players and
 // generates a fresh passphrase.  The passphrase is regenerated on the
 // (very rare) event of a uniqueness collision.

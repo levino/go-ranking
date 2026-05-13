@@ -90,11 +90,11 @@ type Game struct {
 }
 
 type User struct {
-	ID           int64
-	Username     string
-	PasswordHash string
-	GroupID      sql.NullInt64
-	IsAdmin      bool
+	ID          int64
+	OIDCSubject string
+	Email       string
+	Name        string
+	CreatedAt   time.Time
 }
 
 // ---- Groups --------------------------------------------------------------
@@ -371,66 +371,159 @@ func (s *Store) queryGames(ctx context.Context, q string, args ...any) ([]Game, 
 	return out, rows.Err()
 }
 
-// ---- Users ---------------------------------------------------------------
-
-func (s *Store) CreateUser(ctx context.Context, username, hash string, groupID *int64, isAdmin bool) (*User, error) {
-	var gid sql.NullInt64
-	if groupID != nil {
-		gid = sql.NullInt64{Int64: *groupID, Valid: true}
-	}
-	res, err := s.DB.ExecContext(ctx,
-		`INSERT INTO users(username,password_hash,group_id,is_admin) VALUES(?,?,?,?)`,
-		username, hash, gid, boolToInt(isAdmin))
-	if err != nil {
-		return nil, err
-	}
-	id, _ := res.LastInsertId()
-	return &User{ID: id, Username: username, PasswordHash: hash, GroupID: gid, IsAdmin: isAdmin}, nil
-}
-
-func (s *Store) UserByUsername(ctx context.Context, username string) (*User, error) {
-	u := &User{}
-	var admin int
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,username,password_hash,group_id,is_admin FROM users WHERE username=?`, username).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.GroupID, &admin)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	u.IsAdmin = admin != 0
-	return u, nil
-}
-
-func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
-	u := &User{}
-	var admin int
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,username,password_hash,group_id,is_admin FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.GroupID, &admin)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	u.IsAdmin = admin != 0
-	return u, nil
-}
-
-func (s *Store) HasAnyUsers(ctx context.Context) (bool, error) {
-	var n int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
-		return false, err
-	}
-	return n > 0, nil
-}
-
 func boolToInt(b bool) int {
 	if b {
 		return 1
 	}
 	return 0
+}
+
+// ---- Users ---------------------------------------------------------------
+
+// UpsertUserByOIDC creates or updates a user identified by their OIDC
+// subject. Email/name are refreshed on every login so a name change in
+// Zitadel propagates here.
+func (s *Store) UpsertUserByOIDC(ctx context.Context, subject, email, name string) (*User, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO users(oidc_subject,email,name) VALUES(?,?,?)
+		 ON CONFLICT(oidc_subject) DO UPDATE SET email=excluded.email, name=excluded.name`,
+		subject, email, name); err != nil {
+		return nil, err
+	}
+	u := &User{}
+	var created string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id,oidc_subject,email,name,created_at FROM users WHERE oidc_subject=?`, subject).
+		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created); err != nil {
+		return nil, err
+	}
+	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
+	u := &User{}
+	var created string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id,oidc_subject,email,name,created_at FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	return u, nil
+}
+
+func (s *Store) UserByOIDC(ctx context.Context, subject string) (*User, error) {
+	u := &User{}
+	var created string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id,oidc_subject,email,name,created_at FROM users WHERE oidc_subject=?`, subject).
+		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	return u, nil
+}
+
+func (s *Store) UserByEmail(ctx context.Context, email string) (*User, error) {
+	u := &User{}
+	var created string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id,oidc_subject,email,name,created_at FROM users WHERE email=?`, email).
+		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	return u, nil
+}
+
+// ---- Group admins (M:N) --------------------------------------------------
+
+func (s *Store) AddGroupAdmin(ctx context.Context, userID, groupID int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT INTO group_admins(user_id,group_id) VALUES(?,?)
+		 ON CONFLICT DO NOTHING`, userID, groupID)
+	return err
+}
+
+func (s *Store) RemoveGroupAdmin(ctx context.Context, userID, groupID int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`DELETE FROM group_admins WHERE user_id=? AND group_id=?`, userID, groupID)
+	return err
+}
+
+func (s *Store) IsGroupAdmin(ctx context.Context, userID, groupID int64) (bool, error) {
+	var n int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM group_admins WHERE user_id=? AND group_id=?`,
+		userID, groupID).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// ListAdminGroups returns the groups the given user administers.
+func (s *Store) ListAdminGroups(ctx context.Context, userID int64) ([]Group, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT g.id,g.slug,g.name,g.created_at
+		   FROM groups g JOIN group_admins ga ON ga.group_id=g.id
+		  WHERE ga.user_id=? ORDER BY g.name`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Group
+	for rows.Next() {
+		var g Group
+		var created string
+		if err := rows.Scan(&g.ID, &g.Slug, &g.Name, &created); err != nil {
+			return nil, err
+		}
+		g.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// ListGroupAdmins returns the users who administer the given group.
+func (s *Store) ListGroupAdmins(ctx context.Context, groupID int64) ([]User, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT u.id,u.oidc_subject,u.email,u.name,u.created_at
+		   FROM users u JOIN group_admins ga ON ga.user_id=u.id
+		  WHERE ga.group_id=? ORDER BY u.email`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		var u User
+		var created string
+		if err := rows.Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created); err != nil {
+			return nil, err
+		}
+		u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }

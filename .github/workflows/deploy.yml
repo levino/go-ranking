@@ -10,17 +10,16 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-deploy:
+  build-and-publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # commit the bumped image tag back to main
       packages: write
-      id-token: write   # required for OIDC trust with the K3s cluster
-
     steps:
       - uses: actions/checkout@v4
 
-      # ----- Build & push image to GHCR -----
+      - uses: docker/setup-qemu-action@v3
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -35,62 +34,52 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=sha,prefix=,format=long
-            type=ref,event=branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # ----- Roll out to K3s using GitHub OIDC -----
-      # k3s API server runs with oidc-issuer-url pointing at GitHub
-      # and oidc-client-id=levinkeller-de. The matching audience is
-      # set on the requested OIDC token below. The User subject this
-      # produces is bound to the go-liga-deployer Role in deploy/rbac.yaml.
-      - name: Acquire GitHub OIDC token
+      # GitOps: bump the image tag in the production overlay so Flux picks
+      # up the new build on its next reconcile (no CI→cluster connection).
+      - name: Update image tag in overlay
         env:
-          KUBE_AUDIENCE: levinkeller-de
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          curl -sSL \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$KUBE_AUDIENCE" \
-            | jq -r .value > /tmp/oidc-token
+          cd deploy/overlays/production
+          # Find-and-replace the newTag line under the matching image.
+          python3 - <<'PY'
+          import os, re, pathlib
+          p = pathlib.Path("kustomization.yaml")
+          text = p.read_text()
+          tag = os.environ["IMAGE_TAG"]
+          new = re.sub(
+              r"(- name: ghcr\.io/levino/go-ranking\s+newTag: )\S+",
+              rf"\g<1>{tag}",
+              text,
+          )
+          if new == text:
+              raise SystemExit("kustomization.yaml unchanged — pattern mismatch")
+          p.write_text(new)
+          PY
+          git --no-pager diff kustomization.yaml
 
-      - name: Configure kubectl
-        env:
-          KUBE_SERVER: https://server.levinkeller.de:6443
-          KUBE_CA: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJkakNDQVIyZ0F3SUJBZ0lCQURBS0JnZ3Foa2pPUFFRREFqQWpNU0V3SHdZRFZRUUREQmhyTTNNdGMyVnkKZG1WeUxXTmhRREUzTnpVMk16ZzVNall3SGhjTk1qWXdOREE0TURnd01qQTJXaGNOTXpZd05EQTFNRGd3TWpBMgpXakFqTVNFd0h3WURWUVFEREJock0zTXRjMlZ5ZG1WeUxXTmhRREUzTnpVMk16ZzVNall3V1RBVEJnY3Foa2pPClBRSUJCZ2dxaGtqT1BRTUJCd05DQUFSbmFxbG9MLys3RTNJOGh3SS8xcDF1Q1NKalczWmZxdUw2TTJYaEpOK0wKVFh6VkR3Q1RWekk5bjBHZFlwMHVhZ1lIVTFtTk5CaDQ3ZEw0L3h4aXE3YW9vMEl3UURBT0JnTlZIUThCQWY4RQpCQU1DQXFRd0R3WURWUjBUQVFIL0JBVXdBd0VCL3pBZEJnTlZIUTRFRmdRVW5yc3NveDBMWVdDTlRSQkd1Nml2Cm1NM0ljczh3Q2dZSUtvWkl6ajBFQXdJRFJ3QXdSQUlnZlRnTzQ0K3JZck5lUWNDcGpyeXdUdXQ0bFY1TW8vbEMKYW9NczViWUZ4TUlDSUhtU1lIc3JnRW5qZTg3UWhrOG8vRG80ZTVqV3RxNEc5SEtWVCtDZnNtbW8KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+      - name: Commit and push image bump
         run: |
-          mkdir -p ~/.kube
-          cat > ~/.kube/config <<EOF
-          apiVersion: v1
-          kind: Config
-          clusters:
-            - name: k3s
-              cluster:
-                server: $KUBE_SERVER
-                certificate-authority-data: $KUBE_CA
-          users:
-            - name: oidc
-              user:
-                tokenFile: /tmp/oidc-token
-          contexts:
-            - name: deploy
-              context:
-                cluster: k3s
-                user: oidc
-                namespace: go-liga
-          current-context: deploy
-          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet deploy/overlays/production/kustomization.yaml; then
+            echo "no change to commit"
+            exit 0
+          fi
+          git add deploy/overlays/production/kustomization.yaml
+          git commit -m "chore(deploy): bump image to ${GITHUB_SHA::12}
 
-      - name: Trigger rollout
-        env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-        run: |
-          kubectl set image deployment/go-liga go-liga="$IMAGE"
-          kubectl rollout status deployment/go-liga --timeout=2m
+          [skip ci]"
+          git push origin HEAD:main
