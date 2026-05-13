@@ -177,6 +177,26 @@ func (s *Store) UpdatePlayer(ctx context.Context, id int64, name string, active 
 	return err
 }
 
+// PlayerByGroupAndName looks up a player within a group by exact name.
+// Used by the MCP add_player/update_player tools so callers can identify
+// players without having to remember numeric IDs.
+func (s *Store) PlayerByGroupAndName(ctx context.Context, groupID int64, name string) (*Player, error) {
+	p := &Player{}
+	var act int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id,group_id,name,gor,active FROM players WHERE group_id=? AND name=?`,
+		groupID, name).
+		Scan(&p.ID, &p.GroupID, &p.Name, &p.GoR, &act)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	p.Active = act != 0
+	return p, nil
+}
+
 func (s *Store) PlayerByID(ctx context.Context, id int64) (*Player, error) {
 	p := &Player{}
 	var act int

@@ -43,6 +43,43 @@ func toolDefs() []Tool {
 			},
 		},
 		{
+			Name:        "remove_admin",
+			Description: "Entfernt einen Admin aus einer Gruppe. Der letzte verbleibende Admin kann sich nicht selbst entfernen.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"group": map[string]any{"type": "string", "description": "Gruppen-Slug."},
+					"email": map[string]any{"type": "string", "description": "E-Mail-Adresse des zu entfernenden Admins."},
+				},
+				"required": []string{"group", "email"},
+			},
+		},
+		{
+			Name:        "update_player",
+			Description: "Ändert einen Spieler — umbenennen oder aktiv/inaktiv setzen. Inaktive Spieler werden in neuen Sessions nicht eingeschlossen.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"group":    map[string]any{"type": "string"},
+					"name":     map[string]any{"type": "string", "description": "Aktueller Name des Spielers."},
+					"new_name": map[string]any{"type": "string", "description": "Optional: neuer Name."},
+					"active":   map[string]any{"type": "boolean", "description": "Optional: aktiv (true) / inaktiv (false)."},
+				},
+				"required": []string{"group", "name"},
+			},
+		},
+		{
+			Name:        "list_sessions",
+			Description: "Listet alle Sessions einer Gruppe (Passphrase, Datum, Spieler- und Partienzahl).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"group": map[string]any{"type": "string"},
+				},
+				"required": []string{"group"},
+			},
+		},
+		{
 			Name:        "record_game",
 			Description: "Trage eine Partie aus einer Session ein. Gibt die neuen GoR-Werte beider Spieler zurück. Vorgabe und Komi werden automatisch aus dem Session-Snapshot berechnet.",
 			InputSchema: map[string]any{
@@ -70,13 +107,13 @@ func toolDefs() []Tool {
 		},
 		{
 			Name:        "add_player",
-			Description: "Fügt einen Spieler (nur Name, kein Account) zu einer Gruppe hinzu.",
+			Description: "Fügt einen Spieler (nur Name, kein Account) zu einer Gruppe hinzu. Der Rang ist eine grobe Schätzung (z.B. '20k' für Anfänger) und wird in einen GoR-Startwert umgesetzt — Kinder haben keinen externen Rang, das ist der Tipp der Trainerin.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"group": map[string]any{"type": "string", "description": "Gruppen-Slug."},
 					"name":  map[string]any{"type": "string", "description": "Spielername."},
-					"rank":  map[string]any{"type": "string", "description": "Optional: Startrang, z.B. '15k' oder '3d'."},
+					"rank":  map[string]any{"type": "string", "description": "Optional: geschätzter Startrang, z.B. '15k' oder '3d'. Default '30k' für Anfänger."},
 				},
 				"required": []string{"group", "name"},
 			},
@@ -125,6 +162,12 @@ func (s *Server) callTool(ctx context.Context, p ToolCallParams) (*ToolCallResul
 		return s.toolCreateGroup(ctx, p.Arguments)
 	case "add_admin":
 		return s.toolAddAdmin(ctx, p.Arguments)
+	case "remove_admin":
+		return s.toolRemoveAdmin(ctx, p.Arguments)
+	case "update_player":
+		return s.toolUpdatePlayer(ctx, p.Arguments)
+	case "list_sessions":
+		return s.toolListSessions(ctx, p.Arguments)
 	case "record_game":
 		return s.toolRecordGame(ctx, p.Arguments)
 	case "list_players":
@@ -197,6 +240,85 @@ func (s *Server) toolAddAdmin(ctx context.Context, args map[string]any) (*ToolCa
 		return errorResult(err.Error()), nil
 	}
 	return textResult(fmt.Sprintf("%s ist jetzt Admin von %s.", email, g.Slug)), nil
+}
+
+func (s *Server) toolRemoveAdmin(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
+	g, me, err := s.resolveAdminGroup(ctx, args)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	email, _ := args["email"].(string)
+	if email == "" {
+		return errorResult("email required"), nil
+	}
+	target, err := s.Service.Store.UserByEmail(ctx, email)
+	if err != nil {
+		return errorResult(fmt.Sprintf("no user with email %q", email)), nil
+	}
+	if target.ID == me.ID {
+		admins, _ := s.Service.Store.ListGroupAdmins(ctx, g.ID)
+		if len(admins) <= 1 {
+			return errorResult("cannot remove the last admin of a group"), nil
+		}
+	}
+	if err := s.Service.Store.RemoveGroupAdmin(ctx, target.ID, g.ID); err != nil {
+		return errorResult(err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("%s ist nicht mehr Admin von %s.", email, g.Slug)), nil
+}
+
+func (s *Server) toolUpdatePlayer(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
+	g, _, err := s.resolveAdminGroup(ctx, args)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	name, _ := args["name"].(string)
+	if name == "" {
+		return errorResult("name required"), nil
+	}
+	p, err := s.Service.Store.PlayerByGroupAndName(ctx, g.ID, name)
+	if err != nil {
+		return errorResult(fmt.Sprintf("no player named %q in %s", name, g.Slug)), nil
+	}
+	newName := p.Name
+	if v, _ := args["new_name"].(string); v != "" {
+		newName = v
+	}
+	active := p.Active
+	if v, ok := args["active"].(bool); ok {
+		active = v
+	}
+	if err := s.Service.Store.UpdatePlayer(ctx, p.ID, newName, active); err != nil {
+		return errorResult(err.Error()), nil
+	}
+	status := "aktiv"
+	if !active {
+		status = "inaktiv"
+	}
+	return textResult(fmt.Sprintf("Spieler %q → %q (%s) in %s.", name, newName, status, g.Slug)), nil
+}
+
+func (s *Server) toolListSessions(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
+	g, _, err := s.resolveAdminGroup(ctx, args)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	sess, err := s.Service.Store.ListSessions(ctx, g.ID)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	if len(sess) == 0 {
+		return textResult(fmt.Sprintf("Keine Sessions in %s. Mit `create_session` anlegen.", g.Slug)), nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Sessions in %s (%d):\n", g.Slug, len(sess))
+	for _, sx := range sess {
+		games, _ := s.Service.Store.ListGamesBySession(ctx, sx.ID)
+		fmt.Fprintf(&b, "  %s  %s  %d Spieler  %d Partien\n",
+			sx.CreatedAt.Format("02.01.2006 15:04"),
+			sx.Passphrase, len(sx.Snapshot), len(games))
+	}
+	return textResult(b.String()), nil
 }
 
 func (s *Server) toolAddPlayer(ctx context.Context, args map[string]any) (*ToolCallResult, error) {

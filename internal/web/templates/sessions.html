@@ -2,11 +2,6 @@
 <nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · Sessions</nav>
 <h1>Sessions</h1>
 
-<form method="post" action="/g/{{.Group.Slug}}/sessions">
-  <p><button class="btn" type="submit">Neue Session erstellen</button>
-     <span class="muted">— friert die aktuellen GoR-Werte ein.</span></p>
-</form>
-
 {{if .Sessions}}
 <table>
 <tr><th>Passphrase</th><th>Erstellt</th><th>Spieler</th><th>Partien</th><th>PDFs</th></tr>
@@ -23,6 +18,6 @@
 </tr>
 {{end}}
 </table>
-{{else}}<p class="muted">Noch keine Sessions.</p>{{end}}
+{{else}}<p class="muted">Noch keine Sessions. Über MCP-Tool <code>create_session</code> anlegen.</p>{{end}}
 {{end}}
 {{template "layout" .}}
