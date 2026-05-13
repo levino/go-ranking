@@ -11,16 +11,48 @@ import (
 func toolDefs() []Tool {
 	return []Tool{
 		{
+			Name:        "list_my_groups",
+			Description: "Listet alle Gruppen, die der eingeloggte User administriert.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "create_group",
+			Description: "Legt eine neue Gruppe an. Der aufrufende User wird automatisch Admin.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"slug": map[string]any{"type": "string", "description": "URL-Kürzel der Gruppe, z.B. 'go-ag-hannover'."},
+					"name": map[string]any{"type": "string", "description": "Klartextname der Gruppe."},
+				},
+				"required": []string{"slug", "name"},
+			},
+		},
+		{
+			Name:        "add_admin",
+			Description: "Fügt einen weiteren Admin zu einer Gruppe hinzu. Die Person muss sich vorher mindestens einmal via id.levinkeller.de eingeloggt haben.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"group": map[string]any{"type": "string", "description": "Gruppen-Slug."},
+					"email": map[string]any{"type": "string", "description": "E-Mail-Adresse des neuen Admins."},
+				},
+				"required": []string{"group", "email"},
+			},
+		},
+		{
 			Name:        "record_game",
 			Description: "Trage eine Partie aus einer Session ein. Gibt die neuen GoR-Werte beider Spieler zurück. Vorgabe und Komi werden automatisch aus dem Session-Snapshot berechnet.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"passphrase":    map[string]any{"type": "string", "description": "Session-Passphrase (z.B. \"jumping-hippo\")."},
-					"black_number":  map[string]any{"type": "integer", "description": "Spielernummer Schwarz aus der Vorgabe-Matrix."},
-					"white_number":  map[string]any{"type": "integer", "description": "Spielernummer Weiß aus der Vorgabe-Matrix."},
-					"board_size":    map[string]any{"type": "string", "enum": []string{"9", "13", "19"}, "description": "Brettgröße: 9, 13 oder 19."},
-					"winner":        map[string]any{"type": "string", "enum": []string{"black", "white"}, "description": "Sieger: 'black' oder 'white'."},
+					"passphrase":   map[string]any{"type": "string", "description": "Session-Passphrase (z.B. \"jumping-hippo\")."},
+					"black_number": map[string]any{"type": "integer", "description": "Spielernummer Schwarz aus der Vorgabe-Matrix."},
+					"white_number": map[string]any{"type": "integer", "description": "Spielernummer Weiß aus der Vorgabe-Matrix."},
+					"board_size":   map[string]any{"type": "string", "enum": []string{"9", "13", "19"}, "description": "Brettgröße: 9, 13 oder 19."},
+					"winner":       map[string]any{"type": "string", "enum": []string{"black", "white"}, "description": "Sieger: 'black' oder 'white'."},
 				},
 				"required": []string{"passphrase", "black_number", "white_number", "board_size", "winner"},
 			},
@@ -31,8 +63,22 @@ func toolDefs() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"group": map[string]any{"type": "string", "description": "Gruppen-Slug. Optional, falls Default gesetzt."},
+					"group": map[string]any{"type": "string", "description": "Gruppen-Slug."},
 				},
+				"required": []string{"group"},
+			},
+		},
+		{
+			Name:        "add_player",
+			Description: "Fügt einen Spieler (nur Name, kein Account) zu einer Gruppe hinzu.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"group": map[string]any{"type": "string", "description": "Gruppen-Slug."},
+					"name":  map[string]any{"type": "string", "description": "Spielername."},
+					"rank":  map[string]any{"type": "string", "description": "Optional: Startrang, z.B. '15k' oder '3d'."},
+				},
+				"required": []string{"group", "name"},
 			},
 		},
 		{
@@ -43,6 +89,7 @@ func toolDefs() []Tool {
 				"properties": map[string]any{
 					"group": map[string]any{"type": "string"},
 				},
+				"required": []string{"group"},
 			},
 		},
 		{
@@ -64,6 +111,7 @@ func toolDefs() []Tool {
 				"properties": map[string]any{
 					"group": map[string]any{"type": "string"},
 				},
+				"required": []string{"group"},
 			},
 		},
 	}
@@ -71,10 +119,18 @@ func toolDefs() []Tool {
 
 func (s *Server) callTool(ctx context.Context, p ToolCallParams) (*ToolCallResult, error) {
 	switch p.Name {
+	case "list_my_groups":
+		return s.toolListMyGroups(ctx)
+	case "create_group":
+		return s.toolCreateGroup(ctx, p.Arguments)
+	case "add_admin":
+		return s.toolAddAdmin(ctx, p.Arguments)
 	case "record_game":
 		return s.toolRecordGame(ctx, p.Arguments)
 	case "list_players":
 		return s.toolListPlayers(ctx, p.Arguments)
+	case "add_player":
+		return s.toolAddPlayer(ctx, p.Arguments)
 	case "ranking":
 		return s.toolRanking(ctx, p.Arguments)
 	case "get_session":
@@ -85,11 +141,107 @@ func (s *Server) callTool(ctx context.Context, p ToolCallParams) (*ToolCallResul
 	return nil, fmt.Errorf("unknown tool: %s", p.Name)
 }
 
+func (s *Server) toolListMyGroups(ctx context.Context) (*ToolCallResult, error) {
+	user, err := s.callerUser(ctx)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	groups, err := s.Service.Store.ListAdminGroups(ctx, user.ID)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	if len(groups) == 0 {
+		return textResult("Du administrierst noch keine Gruppe. Mit `create_group` eine anlegen."), nil
+	}
+	var b strings.Builder
+	for _, g := range groups {
+		fmt.Fprintf(&b, "  %-30s %s\n", g.Slug, g.Name)
+	}
+	return textResult(fmt.Sprintf("Gruppen (%d):\n%s", len(groups), b.String())), nil
+}
+
+func (s *Server) toolCreateGroup(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
+	user, err := s.callerUser(ctx)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	slug, _ := args["slug"].(string)
+	name, _ := args["name"].(string)
+	if slug == "" || name == "" {
+		return errorResult("slug and name required"), nil
+	}
+	g, err := s.Service.CreateGroupWithSlug(ctx, slug, name)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	if err := s.Service.Store.AddGroupAdmin(ctx, user.ID, g.ID); err != nil {
+		return errorResult(err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("Gruppe %q (%s) angelegt, du bist Admin.", g.Name, g.Slug)), nil
+}
+
+func (s *Server) toolAddAdmin(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
+	g, _, err := s.resolveAdminGroup(ctx, args)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	email, _ := args["email"].(string)
+	if email == "" {
+		return errorResult("email required"), nil
+	}
+	target, err := s.Service.Store.UserByEmail(ctx, email)
+	if err != nil {
+		return errorResult(fmt.Sprintf("no user with email %q — they must log in via the web UI first", email)), nil
+	}
+	if err := s.Service.Store.AddGroupAdmin(ctx, target.ID, g.ID); err != nil {
+		return errorResult(err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("%s ist jetzt Admin von %s.", email, g.Slug)), nil
+}
+
+func (s *Server) toolAddPlayer(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
+	g, _, err := s.resolveAdminGroup(ctx, args)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	name, _ := args["name"].(string)
+	if name == "" {
+		return errorResult("name required"), nil
+	}
+	gor := 100.0
+	if rk, _ := args["rank"].(string); rk != "" {
+		v, err := rating.FromRank(rk)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		gor = v
+	}
+	p, err := s.Service.Store.CreatePlayer(ctx, g.ID, name, gor)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("Spieler %q angelegt (GoR %.0f, %s) in %s.",
+		p.Name, p.GoR, rating.FormatRank(p.GoR), g.Slug)), nil
+}
+
 func (s *Server) toolRecordGame(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
 	pass, _ := args["passphrase"].(string)
 	if pass == "" {
 		return errorResult("passphrase required"), nil
 	}
+	sess, err := s.Service.Store.SessionByPassphrase(ctx, pass)
+	if err != nil {
+		return errorResult("unknown session: " + pass), nil
+	}
+	// Gate on group admin membership.
+	g, err := s.Service.Store.GroupByID(ctx, sess.GroupID)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	if _, _, err := s.resolveAdminGroup(ctx, map[string]any{"group": g.Slug}); err != nil {
+		return errorResult(err.Error()), nil
+	}
+
 	bn, ok1 := numArg(args["black_number"])
 	wn, ok2 := numArg(args["white_number"])
 	if !ok1 || !ok2 {
@@ -110,10 +262,6 @@ func (s *Server) toolRecordGame(ctx context.Context, args map[string]any) (*Tool
 	if winner != "black" && winner != "white" {
 		return errorResult("winner must be 'black' or 'white'"), nil
 	}
-	sess, err := s.Service.Store.SessionByPassphrase(ctx, pass)
-	if err != nil {
-		return errorResult("unknown session: " + pass), nil
-	}
 	black, err := s.Service.PlayerByNumber(sess, bn)
 	if err != nil {
 		return errorResult(err.Error()), nil
@@ -122,7 +270,7 @@ func (s *Server) toolRecordGame(ctx context.Context, args map[string]any) (*Tool
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
-	g, err := s.Service.RecordResult(ctx, sess.ID, black.PlayerID, white.PlayerID, board, winner == "black")
+	gm, err := s.Service.RecordResult(ctx, sess.ID, black.PlayerID, white.PlayerID, board, winner == "black")
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
@@ -130,15 +278,15 @@ func (s *Server) toolRecordGame(ctx context.Context, args map[string]any) (*Tool
 		"Eingetragen: %s (#%d, Schwarz) vs %s (#%d, Weiß) auf %s. "+
 			"Vorgabe %d, Komi %.1f, Sieger: %s.\n"+
 			"Schwarz GoR: %.0f → %.0f (%+.1f), Weiß GoR: %.0f → %.0f (%+.1f).",
-		black.Name, bn, white.Name, wn, board, g.Handicap, g.Komi, g.Winner,
-		g.BlackGoRBefore, g.BlackGoRAfter, g.BlackGoRAfter-g.BlackGoRBefore,
-		g.WhiteGoRBefore, g.WhiteGoRAfter, g.WhiteGoRAfter-g.WhiteGoRBefore,
+		black.Name, bn, white.Name, wn, board, gm.Handicap, gm.Komi, gm.Winner,
+		gm.BlackGoRBefore, gm.BlackGoRAfter, gm.BlackGoRAfter-gm.BlackGoRBefore,
+		gm.WhiteGoRBefore, gm.WhiteGoRAfter, gm.WhiteGoRAfter-gm.WhiteGoRBefore,
 	)
 	return textResult(out), nil
 }
 
 func (s *Server) toolListPlayers(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
-	g, err := s.resolveGroup(ctx, args)
+	g, _, err := s.resolveAdminGroup(ctx, args)
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
@@ -159,7 +307,7 @@ func (s *Server) toolListPlayers(ctx context.Context, args map[string]any) (*Too
 }
 
 func (s *Server) toolRanking(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
-	g, err := s.resolveGroup(ctx, args)
+	g, _, err := s.resolveAdminGroup(ctx, args)
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
@@ -184,6 +332,13 @@ func (s *Server) toolGetSession(ctx context.Context, args map[string]any) (*Tool
 	if err != nil {
 		return errorResult("unknown session: " + pass), nil
 	}
+	g, err := s.Service.Store.GroupByID(ctx, sess.GroupID)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	if _, _, err := s.resolveAdminGroup(ctx, map[string]any{"group": g.Slug}); err != nil {
+		return errorResult(err.Error()), nil
+	}
 	games, _ := s.Service.Store.ListGamesBySession(ctx, sess.ID)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Session %s (%s):\n", sess.Passphrase, sess.CreatedAt.Format("02.01.2006 15:04"))
@@ -196,16 +351,16 @@ func (s *Server) toolGetSession(ctx context.Context, args map[string]any) (*Tool
 	for _, e := range sess.Snapshot {
 		pn[e.PlayerID] = e.Name
 	}
-	for _, g := range games {
+	for _, gm := range games {
 		fmt.Fprintf(&b, "  %s: %s (S) vs %s (W) auf %s — Vorgabe %d, Komi %.1f, Sieger %s\n",
-			g.PlayedAt.Format("15:04"),
-			pn[g.BlackPlayerID], pn[g.WhitePlayerID], g.BoardSize, g.Handicap, g.Komi, g.Winner)
+			gm.PlayedAt.Format("15:04"),
+			pn[gm.BlackPlayerID], pn[gm.WhitePlayerID], gm.BoardSize, gm.Handicap, gm.Komi, gm.Winner)
 	}
 	return textResult(b.String()), nil
 }
 
 func (s *Server) toolCreateSession(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
-	g, err := s.resolveGroup(ctx, args)
+	g, _, err := s.resolveAdminGroup(ctx, args)
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}

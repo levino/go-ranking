@@ -16,11 +16,15 @@ import (
 // Server holds dependencies for handling MCP RPCs.
 type Server struct {
 	Service *service.Service
-	// AuthToken is a shared bearer token; empty disables auth.
+
+	// AuthToken is a shared bearer token; empty disables auth and the
+	// server falls back to MCPUser (useful for tests).
 	AuthToken string
-	// DefaultGroupSlug is used by tools that take a group slug parameter
-	// when none is given.
-	DefaultGroupSlug string
+
+	// MCPUser is the OIDC subject the shared token acts as. Every tool
+	// call is checked against this user's group admin memberships. Must
+	// be set whenever AuthToken is set.
+	MCPUser string
 }
 
 // Handler returns an http.Handler that serves the MCP endpoint at /mcp.
@@ -40,6 +44,20 @@ func (s *Server) authorize(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(s.AuthToken)) == 1
 }
 
+// callerUser resolves the user the current request acts as. In phase 1
+// the user is fixed (MCPUser). When OAuth lands, this will inspect the
+// access token claims instead.
+func (s *Server) callerUser(ctx context.Context) (*store.User, error) {
+	if s.MCPUser == "" {
+		return nil, fmt.Errorf("MCP user not configured (set GO_LIGA_MCP_USER)")
+	}
+	u, err := s.Service.Store.UserByOIDC(ctx, s.MCPUser)
+	if err != nil {
+		return nil, fmt.Errorf("configured MCP user %q not in DB — log in via the web UI once to create the record", s.MCPUser)
+	}
+	return u, nil
+}
+
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -50,7 +68,6 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, nil, codeParseError, err.Error())
 		return
 	}
-	// MCP allows a single request or a JSON-RPC batch.
 	trimmed := strings.TrimSpace(string(body))
 	wantSSE := strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 	if strings.HasPrefix(trimmed, "[") {
@@ -75,16 +92,12 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := s.dispatch(r.Context(), req)
 	if resp == nil {
-		// notification — no body
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 	writeResponses(w, wantSSE, []Response{*resp})
 }
 
-// handleSSEStream serves a no-op SSE channel — we have nothing to push,
-// but Claude.ai expects GET /mcp to be available. We simply hold the
-// connection open until the client disconnects.
 func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -130,8 +143,6 @@ func writeJSONError(w http.ResponseWriter, id json.RawMessage, code int, msg str
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// dispatch routes a single request to the right handler. Notifications
-// (no ID) return nil.
 func (s *Server) dispatch(ctx context.Context, req Request) *Response {
 	resp := &Response{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
@@ -163,21 +174,34 @@ func (s *Server) dispatch(ctx context.Context, req Request) *Response {
 		resp.Result = out
 	default:
 		if req.ID == nil {
-			return nil // unknown notification, ignore
+			return nil
 		}
 		resp.Error = &RPCError{Code: codeMethodNotFound, Message: req.Method}
 	}
 	return resp
 }
 
-// resolveGroup loads the group referenced by the args (or the default).
-func (s *Server) resolveGroup(ctx context.Context, args map[string]any) (*store.Group, error) {
+// resolveAdminGroup loads the group referenced by args and verifies the
+// caller is one of its admins.
+func (s *Server) resolveAdminGroup(ctx context.Context, args map[string]any) (*store.Group, *store.User, error) {
+	user, err := s.callerUser(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	slug, _ := args["group"].(string)
 	if slug == "" {
-		slug = s.DefaultGroupSlug
+		return nil, nil, fmt.Errorf("missing group slug — use list_my_groups to see options")
 	}
-	if slug == "" {
-		return nil, fmt.Errorf("missing group slug")
+	g, err := s.Service.Store.GroupBySlug(ctx, slug)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unknown group: %s", slug)
 	}
-	return s.Service.Store.GroupBySlug(ctx, slug)
+	ok, err := s.Service.Store.IsGroupAdmin(ctx, user.ID, g.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ok {
+		return nil, nil, fmt.Errorf("you are not an admin of %q", slug)
+	}
+	return g, user, nil
 }

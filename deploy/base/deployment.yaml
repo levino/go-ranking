@@ -19,6 +19,8 @@ spec:
         app.kubernetes.io/name: go-liga
     spec:
       serviceAccountName: go-liga
+      imagePullSecrets:
+        - name: ghcr-pull-secret
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -38,6 +40,10 @@ spec:
               value: /data/go-liga.db
             - name: GO_LIGA_LISTEN
               value: ":8080"
+            - name: GO_LIGA_OIDC_REDIRECT_URL
+              value: "https://ranking.go-ag.levinkeller.de/auth/callback"
+            - name: GO_LIGA_OIDC_ISSUER
+              value: "https://id.levinkeller.de"
           envFrom:
             - secretRef:
                 name: go-liga-secret
@@ -46,13 +52,13 @@ spec:
               mountPath: /data
           readinessProbe:
             httpGet:
-              path: /login
+              path: /healthz
               port: http
             initialDelaySeconds: 2
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /login
+              path: /healthz
               port: http
             initialDelaySeconds: 10
             periodSeconds: 30

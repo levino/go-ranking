@@ -1,38 +1,34 @@
 {{define "content"}}
-<h1>Admin-Bereich</h1>
+<nav class="breadcrumb"><a href="/">Start</a> / <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> / Admins</nav>
+<h1>{{.Group.Name}} — Admins</h1>
 
-<h2>Gruppe anlegen</h2>
-<form method="post" action="/admin/groups">
-  <label>Name</label>
-  <input name="name" required>
-  <p><button class="btn" type="submit">Gruppe anlegen</button></p>
+<h2>Aktuelle Admins</h2>
+{{if .Admins}}
+<table>
+  <thead><tr><th>Name</th><th>E-Mail</th><th></th></tr></thead>
+  <tbody>
+  {{range .Admins}}
+    <tr>
+      <td>{{if .Name}}{{.Name}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{.Email}}</td>
+      <td>
+        <form method="post" action="/g/{{$.Group.Slug}}/admins/remove" class="inline">
+          <input type="hidden" name="user_id" value="{{.ID}}">
+          <button class="btn danger" type="submit">entfernen</button>
+        </form>
+      </td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+
+<h2>Co-Admin hinzufügen</h2>
+<p class="muted">Die Person muss sich vorher mindestens einmal über id.levinkeller.de eingeloggt haben (dann existiert ihr Account hier).</p>
+<form method="post" action="/g/{{.Group.Slug}}/admins/add">
+  <label>E-Mail des bestehenden Users</label>
+  <input name="email" type="email" required>
+  <p><button class="btn" type="submit">Hinzufügen</button></p>
 </form>
-
-<h2>Benutzer anlegen</h2>
-<form method="post" action="/admin/users">
-  <div class="row">
-    <div>
-      <label>Username</label>
-      <input name="username" required>
-    </div>
-    <div>
-      <label>Passwort</label>
-      <input name="password" type="password" required>
-    </div>
-    <div>
-      <label>Gruppe</label>
-      <select name="group_id">
-        <option value="">— Admin (alle Gruppen)</option>
-        {{range .Groups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-      </select>
-    </div>
-  </div>
-  <p><button class="btn" type="submit">Benutzer anlegen</button></p>
-</form>
-
-<h2>Gruppen</h2>
-<ul>
-{{range .Groups}}<li><a href="/g/{{.Slug}}">{{.Name}}</a> <span class="muted">({{.Slug}})</span></li>{{end}}
-</ul>
 {{end}}
 {{template "layout" .}}

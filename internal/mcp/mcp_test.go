@@ -14,7 +14,7 @@ import (
 	"github.com/levino/go-ranking/internal/store"
 )
 
-func newTestServer(t *testing.T) *Server {
+func newTestServer(t *testing.T) (*Server, *store.User) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "m.db"))
@@ -22,7 +22,11 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return &Server{Service: service.New(st)}
+	u, err := st.UpsertUserByOIDC(context.Background(), "test-sub", "test@example.com", "Test User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Server{Service: service.New(st), MCPUser: u.OIDCSubject}, u
 }
 
 func post(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
@@ -35,7 +39,7 @@ func post(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder 
 }
 
 func TestInitializeNegotiation(t *testing.T) {
-	s := newTestServer(t)
+	s, _ := newTestServer(t)
 	w := post(t, s.Handler(), `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
@@ -54,7 +58,7 @@ func TestInitializeNegotiation(t *testing.T) {
 }
 
 func TestNotificationHasNoBody(t *testing.T) {
-	s := newTestServer(t)
+	s, _ := newTestServer(t)
 	w := post(t, s.Handler(), `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", w.Code)
@@ -65,7 +69,7 @@ func TestNotificationHasNoBody(t *testing.T) {
 }
 
 func TestUnknownMethodReturnsError(t *testing.T) {
-	s := newTestServer(t)
+	s, _ := newTestServer(t)
 	w := post(t, s.Handler(), `{"jsonrpc":"2.0","id":1,"method":"foo/bar"}`)
 	var resp Response
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
@@ -75,7 +79,7 @@ func TestUnknownMethodReturnsError(t *testing.T) {
 }
 
 func TestParseErrorReturnsParseCode(t *testing.T) {
-	s := newTestServer(t)
+	s, _ := newTestServer(t)
 	w := post(t, s.Handler(), `not json`)
 	var resp Response
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
@@ -85,7 +89,7 @@ func TestParseErrorReturnsParseCode(t *testing.T) {
 }
 
 func TestBatchRequestReturnsArray(t *testing.T) {
-	s := newTestServer(t)
+	s, _ := newTestServer(t)
 	body := `[
         {"jsonrpc":"2.0","id":1,"method":"tools/list"},
         {"jsonrpc":"2.0","id":2,"method":"ping"}
@@ -123,27 +127,33 @@ func TestNumArg(t *testing.T) {
 	}
 }
 
-func TestResolveGroupUsesDefault(t *testing.T) {
-	s := newTestServer(t)
+func TestCreateGroupViaMCPMakesCallerAdmin(t *testing.T) {
+	s, u := newTestServer(t)
 	ctx := context.Background()
-	g, _ := s.Service.CreateGroup(ctx, "Default")
-	s.DefaultGroupSlug = g.Slug
-
-	got, err := s.resolveGroup(ctx, map[string]any{})
-	if err != nil || got.ID != g.ID {
-		t.Fatalf("default group not used: %v", err)
+	out, err := s.toolCreateGroup(ctx, map[string]any{"slug": "test-group", "name": "Test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.IsError {
+		t.Fatalf("create_group failed: %+v", out)
+	}
+	g, err := s.Service.Store.GroupBySlug(ctx, "test-group")
+	if err != nil {
+		t.Fatalf("group not created: %v", err)
+	}
+	ok, err := s.Service.Store.IsGroupAdmin(ctx, u.ID, g.ID)
+	if err != nil || !ok {
+		t.Fatalf("caller is not admin: %v", err)
 	}
 }
 
-func TestResolveGroupExplicitOverride(t *testing.T) {
-	s := newTestServer(t)
+func TestResolveAdminGroupRejectsNonAdmin(t *testing.T) {
+	s, _ := newTestServer(t)
 	ctx := context.Background()
-	g1, _ := s.Service.CreateGroup(ctx, "One")
-	g2, _ := s.Service.CreateGroup(ctx, "Two")
-	s.DefaultGroupSlug = g1.Slug
-
-	got, err := s.resolveGroup(ctx, map[string]any{"group": g2.Slug})
-	if err != nil || got.ID != g2.ID {
-		t.Fatalf("explicit override failed: %v", err)
+	g, _ := s.Service.CreateGroup(ctx, "Other")
+	// caller has no group_admins entry → reject
+	_, _, err := s.resolveAdminGroup(ctx, map[string]any{"group": g.Slug})
+	if err == nil {
+		t.Fatal("expected admin check to fail")
 	}
 }

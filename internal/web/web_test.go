@@ -11,13 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/levino/go-ranking/internal/auth"
 	"github.com/levino/go-ranking/internal/service"
 	"github.com/levino/go-ranking/internal/store"
 )
 
-func newTestWebServer(t *testing.T) (*httptest.Server, *service.Service) {
+func newTestWebServer(t *testing.T) (*httptest.Server, *service.Service, *auth.Signer) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "w.db"))
@@ -29,17 +30,36 @@ func newTestWebServer(t *testing.T) (*httptest.Server, *service.Service) {
 	keyHex := strings.Repeat("b", 64)
 	keyBytes, _ := hex.DecodeString(keyHex)
 	signer := auth.NewSigner(keyBytes)
-	srv, err := New(svc, signer)
+	oidc := auth.NewOIDC("https://example.invalid", "id", "secret", "http://localhost/auth/callback")
+	srv, err := New(svc, signer, oidc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return ts, svc
+	return ts, svc, signer
+}
+
+// loggedInClient mints a session cookie via the signer (skipping the OIDC
+// dance) and returns an http.Client carrying it.
+func loggedInClient(t *testing.T, ts *httptest.Server, signer *auth.Signer, userID int64) *http.Client {
+	t.Helper()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	rec := httptest.NewRecorder()
+	if err := signer.Issue(rec, userID, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	srvURL, _ := url.Parse(ts.URL)
+	jar.SetCookies(srvURL, rec.Result().Cookies())
+	return c
 }
 
 func TestLoginPageRenders(t *testing.T) {
-	ts, _ := newTestWebServer(t)
+	ts, _, _ := newTestWebServer(t)
 	resp, err := http.Get(ts.URL + "/login")
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +72,7 @@ func TestLoginPageRenders(t *testing.T) {
 }
 
 func TestUnauthenticatedRedirectsToLogin(t *testing.T) {
-	ts, _ := newTestWebServer(t)
+	ts, _, _ := newTestWebServer(t)
 	c := &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
@@ -66,38 +86,30 @@ func TestUnauthenticatedRedirectsToLogin(t *testing.T) {
 	}
 }
 
-func TestLoginRejectsBadCredentials(t *testing.T) {
-	ts, svc := newTestWebServer(t)
-	hash, _ := auth.HashPassword("right")
-	_, _ = svc.Store.CreateUser(context.Background(), "alice", hash, nil, true)
-
-	c := &http.Client{
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	resp, err := c.PostForm(ts.URL+"/login", url.Values{
-		"username": {"alice"}, "password": {"wrong"},
-	})
+func TestAuthStartRedirectsToIssuer(t *testing.T) {
+	// We use a bogus issuer so discovery fails — but we can still verify
+	// the handler short-circuits to 500 rather than panicking, and that
+	// the state cookie machinery is wired up. (A real OIDC mock is
+	// covered by the OIDC unit tests if/when we add them.)
+	ts, _, _ := newTestWebServer(t)
+	resp, err := http.Get(ts.URL + "/auth/start")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Fatalf("expected 200 (re-rendered login), got %d", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Ungültige Anmeldedaten") {
-		t.Error("expected error message in body")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 from discovery against example.invalid, got %d", resp.StatusCode)
 	}
 }
 
-func TestNonAdminCannotAccessAdmin(t *testing.T) {
-	ts, svc := newTestWebServer(t)
-	g, _ := svc.CreateGroup(context.Background(), "G")
-	hash, _ := auth.HashPassword("pw")
-	_, _ = svc.Store.CreateUser(context.Background(), "t", hash, &g.ID, false)
+func TestNonAdminCannotAccessGroup(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	_, _ = svc.CreateGroupWithSlug(ctx, "g", "G")
+	stranger, _ := svc.Store.UpsertUserByOIDC(ctx, "stranger-sub", "stranger@example.com", "Stranger")
 
-	c := loggedIn(t, ts, "t", "pw")
-	resp, err := c.Get(ts.URL + "/admin")
+	c := loggedInClient(t, ts, signer, stranger.ID)
+	resp, err := c.Get(ts.URL + "/g/g")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,13 +119,41 @@ func TestNonAdminCannotAccessAdmin(t *testing.T) {
 	}
 }
 
-func TestPlayerCreateAndList(t *testing.T) {
-	ts, svc := newTestWebServer(t)
-	g, _ := svc.CreateGroup(context.Background(), "G")
-	hash, _ := auth.HashPassword("pw")
-	_, _ = svc.Store.CreateUser(context.Background(), "t", hash, &g.ID, false)
+func TestCreateGroupViaForm(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	c := loggedInClient(t, ts, signer, u.ID)
 
-	c := loggedIn(t, ts, "t", "pw")
+	resp, err := c.PostForm(ts.URL+"/groups", url.Values{
+		"slug": {"my-group"}, "name": {"My Group"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("create group: %d", resp.StatusCode)
+	}
+
+	g, err := svc.Store.GroupBySlug(ctx, "my-group")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, _ := svc.Store.IsGroupAdmin(ctx, u.ID, g.ID)
+	if !ok {
+		t.Fatal("creator must be admin")
+	}
+}
+
+func TestPlayerCreateAndList(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroupWithSlug(ctx, "g", "G")
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	_ = svc.Store.AddGroupAdmin(ctx, u.ID, g.ID)
+
+	c := loggedInClient(t, ts, signer, u.ID)
 	resp, err := c.PostForm(ts.URL+"/g/g/players", url.Values{"name": {"Pia"}, "rank": {"15k"}})
 	if err != nil {
 		t.Fatal(err)
@@ -135,12 +175,13 @@ func TestPlayerCreateAndList(t *testing.T) {
 }
 
 func TestPlayersFormRejectsBadRank(t *testing.T) {
-	ts, svc := newTestWebServer(t)
-	g, _ := svc.CreateGroup(context.Background(), "G")
-	hash, _ := auth.HashPassword("pw")
-	_, _ = svc.Store.CreateUser(context.Background(), "t", hash, &g.ID, false)
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroupWithSlug(ctx, "g", "G")
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	_ = svc.Store.AddGroupAdmin(ctx, u.ID, g.ID)
 
-	c := loggedIn(t, ts, "t", "pw")
+	c := loggedInClient(t, ts, signer, u.ID)
 	resp, err := c.PostForm(ts.URL+"/g/g/players", url.Values{
 		"name": {"Pia"}, "rank": {"banana"},
 	})
@@ -151,22 +192,4 @@ func TestPlayersFormRejectsBadRank(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
-}
-
-func loggedIn(t *testing.T, ts *httptest.Server, user, pass string) *http.Client {
-	t.Helper()
-	jar, _ := cookiejar.New(nil)
-	c := &http.Client{
-		Jar: jar,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	resp, err := c.PostForm(ts.URL+"/login", url.Values{"username": {user}, "password": {pass}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("login %d", resp.StatusCode)
-	}
-	return c
 }

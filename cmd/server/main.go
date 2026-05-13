@@ -3,13 +3,15 @@
 // It bundles the web UI and the MCP API in a single binary backed by
 // a SQLite database. Configuration is via environment variables:
 //
-//	GO_LIGA_DB         Path to the SQLite database (default: go-liga.db)
-//	GO_LIGA_LISTEN     HTTP listen address (default: :8080)
-//	GO_LIGA_SIGNING_KEY  HMAC key for session cookies (required, >= 32 bytes)
-//	GO_LIGA_MCP_TOKEN  Bearer token gating /mcp (optional, recommended)
-//	GO_LIGA_MCP_GROUP  Default group slug exposed via MCP (optional)
-//	GO_LIGA_BOOTSTRAP_USER, GO_LIGA_BOOTSTRAP_PASSWORD
-//	                   If set on first run (no users yet), create an admin.
+//	GO_LIGA_DB                   Path to the SQLite database (default: go-liga.db)
+//	GO_LIGA_LISTEN               HTTP listen address (default: :8080)
+//	GO_LIGA_SIGNING_KEY          HMAC key for session cookies (required, >= 32 bytes hex)
+//	GO_LIGA_OIDC_ISSUER          OIDC issuer URL (e.g. https://id.levinkeller.de)
+//	GO_LIGA_OIDC_CLIENT_ID       OIDC client id from Zitadel
+//	GO_LIGA_OIDC_CLIENT_SECRET   OIDC client secret from Zitadel
+//	GO_LIGA_OIDC_REDIRECT_URL    e.g. https://ranking.go-ag.levinkeller.de/auth/callback
+//	GO_LIGA_MCP_TOKEN            Bearer token gating /mcp (phase 1)
+//	GO_LIGA_MCP_USER             OIDC subject the MCP token acts as (required if MCP_TOKEN set)
 package main
 
 import (
@@ -49,33 +51,44 @@ func run() error {
 		return fmt.Errorf("GO_LIGA_SIGNING_KEY must be a hex string of at least 32 bytes (64 hex chars)")
 	}
 
+	oidcCfg := auth.NewOIDC(
+		os.Getenv("GO_LIGA_OIDC_ISSUER"),
+		os.Getenv("GO_LIGA_OIDC_CLIENT_ID"),
+		os.Getenv("GO_LIGA_OIDC_CLIENT_SECRET"),
+		os.Getenv("GO_LIGA_OIDC_REDIRECT_URL"),
+	)
+	if oidcCfg.Issuer == "" || oidcCfg.ClientID == "" ||
+		oidcCfg.ClientSecret == "" || oidcCfg.RedirectURL == "" {
+		return fmt.Errorf("GO_LIGA_OIDC_{ISSUER,CLIENT_ID,CLIENT_SECRET,REDIRECT_URL} are all required")
+	}
+
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
 	defer st.Close()
 
-	if err := bootstrapAdmin(st); err != nil {
-		return fmt.Errorf("bootstrap admin: %w", err)
-	}
-
 	svc := service.New(st)
 	signer := auth.NewSigner(key)
 
-	webSrv, err := web.New(svc, signer)
+	webSrv, err := web.New(svc, signer, oidcCfg)
 	if err != nil {
 		return fmt.Errorf("web init: %w", err)
 	}
 	mcpSrv := &mcp.Server{
-		Service:          svc,
-		AuthToken:        os.Getenv("GO_LIGA_MCP_TOKEN"),
-		DefaultGroupSlug: os.Getenv("GO_LIGA_MCP_GROUP"),
+		Service:   svc,
+		AuthToken: os.Getenv("GO_LIGA_MCP_TOKEN"),
+		MCPUser:   os.Getenv("GO_LIGA_MCP_USER"),
 	}
 
 	// Compose root mux: /mcp -> mcpSrv, everything else -> webSrv.
 	root := http.NewServeMux()
 	root.Handle("/mcp", mcpSrv.Handler())
 	root.Handle("/mcp/", mcpSrv.Handler())
+	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 	root.Handle("/", webSrv.Handler())
 
 	srv := &http.Server{
@@ -111,35 +124,9 @@ func envOr(k, def string) string {
 	return def
 }
 
-func bootstrapAdmin(st *store.Store) error {
-	user := os.Getenv("GO_LIGA_BOOTSTRAP_USER")
-	pass := os.Getenv("GO_LIGA_BOOTSTRAP_PASSWORD")
-	if user == "" || pass == "" {
-		return nil
-	}
-	ctx := context.Background()
-	any, err := st.HasAnyUsers(ctx)
-	if err != nil {
-		return err
-	}
-	if any {
-		return nil
-	}
-	hash, err := auth.HashPassword(pass)
-	if err != nil {
-		return err
-	}
-	if _, err := st.CreateUser(ctx, user, hash, nil, true); err != nil {
-		return err
-	}
-	log.Printf("bootstrapped admin user %q", user)
-	return nil
-}
-
 func logger(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		// Hide bearer tokens etc. from logs.
 		ua := r.Header.Get("User-Agent")
 		if len(ua) > 50 {
 			ua = ua[:50] + "..."

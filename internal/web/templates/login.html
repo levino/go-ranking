@@ -1,11 +1,6 @@
 {{define "content"}}
 <h1>Anmelden</h1>
-<form method="post" action="/login">
-  <label>Username</label>
-  <input name="username" required autofocus>
-  <label>Passwort</label>
-  <input name="password" type="password" required>
-  <p><button class="btn" type="submit">Anmelden</button></p>
-</form>
+<p>Anmeldung läuft über <a href="https://id.levinkeller.de">id.levinkeller.de</a>.</p>
+<p><a class="btn" href="/auth/start">Mit id.levinkeller.de anmelden</a></p>
 {{end}}
 {{template "layout" .}}
