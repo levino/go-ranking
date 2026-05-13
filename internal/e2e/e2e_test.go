@@ -10,6 +10,8 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -29,6 +31,27 @@ import (
 	"github.com/levino/go-ranking/internal/store"
 	"github.com/levino/go-ranking/internal/web"
 )
+
+// Small PKCE / URL helpers used by TestOAuthFullFlow.
+
+func sha256Sum(s string) []byte {
+	h := sha256.Sum256([]byte(s))
+	return h[:]
+}
+
+func base64URLEncode(b []byte) string {
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func urlEncode(s string) string { return url.QueryEscape(s) }
+
+func extractQueryParam(rawURL, key string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get(key)
+}
 
 // ---- Test rig ------------------------------------------------------------
 
@@ -402,6 +425,127 @@ func TestDocsRenders(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown page: %d", resp.StatusCode)
+	}
+}
+
+// TestOAuthFullFlow walks the complete client-side OAuth ceremony:
+// dynamic client registration → authorize → token → use the issued
+// JWT to call /mcp.
+func TestOAuthFullFlow(t *testing.T) {
+	rg := newRig(t)
+	owner, _, _ := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
+
+	// 1. Dynamic client registration.
+	regBody := `{"client_name":"Claude","redirect_uris":["https://example.test/cb"]}`
+	resp, _ := owner.Post(rg.srv.URL+"/oauth/register",
+		"application/json", strings.NewReader(regBody))
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register: %d body %s", resp.StatusCode, body)
+	}
+	var regResp map[string]any
+	_ = json.Unmarshal(body, &regResp)
+	clientID, _ := regResp["client_id"].(string)
+	if clientID == "" {
+		t.Fatal("no client_id returned")
+	}
+
+	// 2. Build a PKCE pair (S256). Use a fixed verifier so we can
+	// derive the matching challenge deterministically.
+	codeVerifier := "test-pkce-verifier-1234567890123456789012345678"
+	sum := sha256Sum(codeVerifier)
+	codeChallenge := base64URLEncode(sum)
+
+	// 3. Hit /oauth/authorize with the live owner session.
+	authURL := fmt.Sprintf("%s/oauth/authorize?response_type=code&client_id=%s&redirect_uri=%s&code_challenge=%s&code_challenge_method=S256&state=xyz",
+		rg.srv.URL, clientID, urlEncode("https://example.test/cb"), codeChallenge)
+	resp, _ = owner.Get(authURL)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("authorize: %d", resp.StatusCode)
+	}
+	location := resp.Header.Get("Location")
+	if !strings.HasPrefix(location, "https://example.test/cb?") {
+		t.Fatalf("authorize redirect = %s", location)
+	}
+	code := extractQueryParam(location, "code")
+	if code == "" {
+		t.Fatal("no code in authorize redirect")
+	}
+
+	// 4. Exchange the code for an access token at /oauth/token.
+	tokForm := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {clientID},
+		"redirect_uri":  {"https://example.test/cb"},
+		"code_verifier": {codeVerifier},
+	}
+	resp, _ = http.PostForm(rg.srv.URL+"/oauth/token", tokForm)
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("token: %d body %s", resp.StatusCode, body)
+	}
+	var tokResp map[string]any
+	_ = json.Unmarshal(body, &tokResp)
+	accessToken, _ := tokResp["access_token"].(string)
+	if accessToken == "" {
+		t.Fatalf("no access_token: %s", body)
+	}
+
+	// 5. The token should now work as a Bearer on /mcp.
+	res := mcpRPC(t, rg.mcpURL, accessToken, "tools/list", map[string]any{})
+	if res.Error != nil {
+		t.Fatalf("tools/list with fresh JWT failed: %+v", res.Error)
+	}
+
+	// 6. Re-using the same code is rejected (single-use).
+	resp, _ = http.PostForm(rg.srv.URL+"/oauth/token", tokForm)
+	resp.Body.Close()
+	if resp.StatusCode == 200 {
+		t.Errorf("code should be single-use, got 200 on second exchange")
+	}
+
+	// 7. Wrong PKCE verifier is rejected.
+	tokForm2 := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {clientID},
+		"redirect_uri":  {"https://example.test/cb"},
+		"code_verifier": {"wrong-verifier"},
+	}
+	resp, _ = http.PostForm(rg.srv.URL+"/oauth/token", tokForm2)
+	resp.Body.Close()
+	if resp.StatusCode == 200 {
+		t.Errorf("wrong code_verifier should be rejected")
+	}
+}
+
+// TestMCPListPlayersAndRanking covers the two read-only MCP tools that
+// the earlier integration test didn't touch directly.
+func TestMCPListPlayersAndRanking(t *testing.T) {
+	rg := newRig(t)
+	_, _, ownerTok := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
+	mustToolOK(t, rg, ownerTok, "create_group", map[string]any{"slug": "g1", "name": "Group One"})
+	mustToolOK(t, rg, ownerTok, "add_player", map[string]any{"group": "g1", "name": "Anna", "rank": "10k"})
+	mustToolOK(t, rg, ownerTok, "add_player", map[string]any{"group": "g1", "name": "Ben", "rank": "20k"})
+
+	out := mustToolOK(t, rg, ownerTok, "list_players", map[string]any{"group": "g1"})
+	if !strings.Contains(out, "Anna") || !strings.Contains(out, "Ben") {
+		t.Errorf("list_players missing names: %s", out)
+	}
+
+	out = mustToolOK(t, rg, ownerTok, "ranking", map[string]any{"group": "g1"})
+	// Anna (10k) is stronger than Ben (20k) so should be first in the list.
+	annaIdx := strings.Index(out, "Anna")
+	benIdx := strings.Index(out, "Ben")
+	if annaIdx < 0 || benIdx < 0 {
+		t.Fatalf("ranking missing names: %s", out)
+	}
+	if annaIdx >= benIdx {
+		t.Errorf("ranking should list stronger first (Anna before Ben): %s", out)
 	}
 }
 
