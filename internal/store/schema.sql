@@ -32,19 +32,10 @@ CREATE TABLE IF NOT EXISTS players (
 );
 CREATE INDEX IF NOT EXISTS idx_players_group ON players(group_id);
 
-CREATE TABLE IF NOT EXISTS sessions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    passphrase  TEXT NOT NULL UNIQUE,
-    snapshot    TEXT NOT NULL, -- JSON array of {player_id, name, gor, number}
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_group ON sessions(group_id);
-
 CREATE TABLE IF NOT EXISTS oauth_clients (
     client_id     TEXT PRIMARY KEY,
     client_name   TEXT,
-    redirect_uris TEXT NOT NULL, -- JSON array of strings
+    redirect_uris TEXT NOT NULL,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -60,20 +51,25 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
 CREATE INDEX IF NOT EXISTS idx_oauth_codes_expires ON oauth_codes(expires_at);
 
 CREATE TABLE IF NOT EXISTS games (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    black_player_id INTEGER NOT NULL REFERENCES players(id),
-    white_player_id INTEGER NOT NULL REFERENCES players(id),
-    board_size      INTEGER NOT NULL,
-    handicap        INTEGER NOT NULL,
-    komi            REAL NOT NULL,
-    winner          TEXT NOT NULL CHECK (winner IN ('black','white')),
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id         INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    black_player_id  INTEGER NOT NULL REFERENCES players(id),
+    white_player_id  INTEGER NOT NULL REFERENCES players(id),
+    board_size       INTEGER NOT NULL,
+    handicap         INTEGER NOT NULL,
+    komi             REAL NOT NULL,
+    winner           TEXT NOT NULL CHECK (winner IN ('black','white')),
     black_gor_before REAL NOT NULL,
     white_gor_before REAL NOT NULL,
     black_gor_after  REAL NOT NULL,
     white_gor_after  REAL NOT NULL,
-    played_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    played_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_games_session ON games(session_id);
-CREATE INDEX IF NOT EXISTS idx_games_black   ON games(black_player_id);
-CREATE INDEX IF NOT EXISTS idx_games_white   ON games(white_player_id);
+CREATE INDEX IF NOT EXISTS idx_games_group ON games(group_id);
+CREATE INDEX IF NOT EXISTS idx_games_black ON games(black_player_id);
+CREATE INDEX IF NOT EXISTS idx_games_white ON games(white_player_id);
+
+-- Migration: legacy `sessions` table is removed. If an older deployment
+-- still has it, the table can be dropped manually — there is no live data
+-- to preserve. The `games.session_id` column from the old schema is left
+-- alone if present; new inserts use the new column list.

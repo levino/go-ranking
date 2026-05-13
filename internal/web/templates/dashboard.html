@@ -1,11 +1,11 @@
 {{define "content"}}
 <nav class="breadcrumb"><a href="/">Start</a> · {{.Group.Name}}</nav>
 <h1>{{.Group.Name}}
-  <a class="btn secondary" style="float:right;font-size:.9rem" href="/g/{{.Group.Slug}}/admins">Admins verwalten</a>
+  <a class="btn" style="float:right" href="/g/{{.Group.Slug}}/play">Spielen</a>
 </h1>
+
 <div class="row">
   <div class="kpi"><div class="muted">Spieler</div><div class="v">{{len .Players}}</div></div>
-  <div class="kpi"><div class="muted">Sessions</div><div class="v">{{.SessionCount}}</div></div>
   <div class="kpi"><div class="muted">Partien gesamt</div><div class="v">{{.GameCount}}</div></div>
 </div>
 

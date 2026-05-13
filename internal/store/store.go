@@ -58,24 +58,9 @@ type Player struct {
 	Active  bool
 }
 
-type SnapshotEntry struct {
-	PlayerID int64   `json:"player_id"`
-	Number   int     `json:"number"`
-	Name     string  `json:"name"`
-	GoR      float64 `json:"gor"`
-}
-
-type Session struct {
-	ID         int64
-	GroupID    int64
-	Passphrase string
-	Snapshot   []SnapshotEntry
-	CreatedAt  time.Time
-}
-
 type Game struct {
 	ID             int64
-	SessionID      int64
+	GroupID        int64
 	BlackPlayerID  int64
 	WhitePlayerID  int64
 	BoardSize      rating.BoardSize
@@ -237,84 +222,11 @@ func (s *Store) ListPlayers(ctx context.Context, groupID int64, includeInactive 
 	return out, rows.Err()
 }
 
-// ---- Sessions ------------------------------------------------------------
-
-func (s *Store) CreateSession(ctx context.Context, groupID int64, passphrase string, snapshot []SnapshotEntry) (*Session, error) {
-	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		return nil, err
-	}
-	res, err := s.DB.ExecContext(ctx,
-		`INSERT INTO sessions(group_id,passphrase,snapshot) VALUES(?,?,?)`, groupID, passphrase, string(raw))
-	if err != nil {
-		return nil, err
-	}
-	id, _ := res.LastInsertId()
-	return &Session{ID: id, GroupID: groupID, Passphrase: passphrase, Snapshot: snapshot, CreatedAt: time.Now()}, nil
-}
-
-func (s *Store) SessionByPassphrase(ctx context.Context, p string) (*Session, error) {
-	sess := &Session{}
-	var snap, created string
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,group_id,passphrase,snapshot,created_at FROM sessions WHERE passphrase=?`, p).
-		Scan(&sess.ID, &sess.GroupID, &sess.Passphrase, &snap, &created)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal([]byte(snap), &sess.Snapshot); err != nil {
-		return nil, fmt.Errorf("bad snapshot: %w", err)
-	}
-	sess.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
-	return sess, nil
-}
-
-func (s *Store) SessionByID(ctx context.Context, id int64) (*Session, error) {
-	sess := &Session{}
-	var snap, created string
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,group_id,passphrase,snapshot,created_at FROM sessions WHERE id=?`, id).
-		Scan(&sess.ID, &sess.GroupID, &sess.Passphrase, &snap, &created)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal([]byte(snap), &sess.Snapshot); err != nil {
-		return nil, err
-	}
-	sess.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
-	return sess, nil
-}
-
-func (s *Store) ListSessions(ctx context.Context, groupID int64) ([]Session, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id,group_id,passphrase,snapshot,created_at FROM sessions WHERE group_id=? ORDER BY created_at DESC`, groupID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Session
-	for rows.Next() {
-		var sess Session
-		var snap, created string
-		if err := rows.Scan(&sess.ID, &sess.GroupID, &sess.Passphrase, &snap, &created); err != nil {
-			return nil, err
-		}
-		_ = json.Unmarshal([]byte(snap), &sess.Snapshot)
-		sess.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
-		out = append(out, sess)
-	}
-	return out, rows.Err()
-}
-
 // ---- Games ---------------------------------------------------------------
 
 // RecordGame inserts a new game and updates both players' GoR atomically.
+// The caller is expected to have computed the after-GoRs already from the
+// before-GoRs and the handicap bonus (see service.RecordGame).
 func (s *Store) RecordGame(ctx context.Context, g Game) (*Game, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -322,10 +234,10 @@ func (s *Store) RecordGame(ctx context.Context, g Game) (*Game, error) {
 	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO games(session_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
+		`INSERT INTO games(group_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
 		    black_gor_before,white_gor_before,black_gor_after,white_gor_after)
 		 VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		g.SessionID, g.BlackPlayerID, g.WhitePlayerID, int(g.BoardSize), g.Handicap, g.Komi, g.Winner,
+		g.GroupID, g.BlackPlayerID, g.WhitePlayerID, int(g.BoardSize), g.Handicap, g.Komi, g.Winner,
 		g.BlackGoRBefore, g.WhiteGoRBefore, g.BlackGoRAfter, g.WhiteGoRAfter)
 	if err != nil {
 		return nil, err
@@ -345,24 +257,16 @@ func (s *Store) RecordGame(ctx context.Context, g Game) (*Game, error) {
 	return &g, nil
 }
 
-func (s *Store) ListGamesBySession(ctx context.Context, sessionID int64) ([]Game, error) {
-	return s.queryGames(ctx,
-		`SELECT id,session_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
-		        black_gor_before,white_gor_before,black_gor_after,white_gor_after,played_at
-		 FROM games WHERE session_id=? ORDER BY played_at`, sessionID)
-}
-
 func (s *Store) ListRecentGames(ctx context.Context, groupID int64, limit int) ([]Game, error) {
 	return s.queryGames(ctx,
-		`SELECT g.id,g.session_id,g.black_player_id,g.white_player_id,g.board_size,g.handicap,g.komi,g.winner,
-		        g.black_gor_before,g.white_gor_before,g.black_gor_after,g.white_gor_after,g.played_at
-		   FROM games g JOIN sessions s ON g.session_id=s.id
-		  WHERE s.group_id=? ORDER BY g.played_at DESC LIMIT ?`, groupID, limit)
+		`SELECT id,group_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
+		        black_gor_before,white_gor_before,black_gor_after,white_gor_after,played_at
+		   FROM games WHERE group_id=? ORDER BY played_at DESC LIMIT ?`, groupID, limit)
 }
 
 func (s *Store) ListGamesByPlayer(ctx context.Context, playerID int64) ([]Game, error) {
 	return s.queryGames(ctx,
-		`SELECT id,session_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
+		`SELECT id,group_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
 		        black_gor_before,white_gor_before,black_gor_after,white_gor_after,played_at
 		   FROM games WHERE black_player_id=? OR white_player_id=? ORDER BY played_at`,
 		playerID, playerID)
@@ -379,7 +283,7 @@ func (s *Store) queryGames(ctx context.Context, q string, args ...any) ([]Game, 
 		var g Game
 		var bs int
 		var played string
-		if err := rows.Scan(&g.ID, &g.SessionID, &g.BlackPlayerID, &g.WhitePlayerID, &bs,
+		if err := rows.Scan(&g.ID, &g.GroupID, &g.BlackPlayerID, &g.WhitePlayerID, &bs,
 			&g.Handicap, &g.Komi, &g.Winner,
 			&g.BlackGoRBefore, &g.WhiteGoRBefore, &g.BlackGoRAfter, &g.WhiteGoRAfter, &played); err != nil {
 			return nil, err

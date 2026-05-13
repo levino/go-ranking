@@ -1,0 +1,143 @@
+{{define "content"}}
+<style>
+.play-card { background:#fff; border:1px solid var(--bd); border-radius:8px; padding:1rem 1.2rem; margin:1rem 0; }
+.play-card h2 { margin-top:0; }
+.bigselect { font-size:1.2rem; padding:.7rem .6rem; min-width:14rem; }
+.bigbtn { font-size:1.2rem; padding:.8rem 1.4rem; }
+.winrow { display:flex; gap:1rem; flex-wrap:wrap; margin-top:.6rem; }
+.winrow label { display:inline-flex; align-items:center; gap:.4rem; font-size:1.1rem; padding:.4rem .6rem; background:#f5f7fa; border:1px solid var(--bd); border-radius:6px; cursor:pointer; }
+.winrow input[type=radio] { transform: scale(1.4); }
+.rec-box { background:#eef9ee; border:1px solid #c4e3c4; padding:.8rem 1rem; border-radius:6px; margin-top:.6rem; font-size:1.1rem; }
+.flash-ok { background:#eef9ee; border:1px solid #c4e3c4; padding:.6rem 1rem; border-radius:6px; margin:1rem 0; }
+.muted-small { color: var(--muted); font-size:.9rem; }
+</style>
+
+<nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · Spielen</nav>
+<h1>Spielen — {{.Group.Name}}</h1>
+
+{{if .Flash}}<div class="flash-ok">{{.Flash}}</div>{{end}}
+
+<!-- ───────────── 1. Vorgabe berechnen ───────────── -->
+<div class="play-card">
+  <h2>1. Vorgabe berechnen</h2>
+  <form method="get" action="/g/{{.Group.Slug}}/play">
+    <input type="hidden" name="action" value="recommend">
+    <div class="row">
+      <div>
+        <label>Spieler A</label>
+        <select name="p1" class="bigselect" required>
+          <option value="">— wählen —</option>
+          {{range .Players}}<option value="{{.ID}}" {{if eq .ID $.Selected.P1ID}}selected{{end}}>{{.Name}} ({{rank .GoR}})</option>{{end}}
+        </select>
+      </div>
+      <div>
+        <label>Spieler B</label>
+        <select name="p2" class="bigselect" required>
+          <option value="">— wählen —</option>
+          {{range .Players}}<option value="{{.ID}}" {{if eq .ID $.Selected.P2ID}}selected{{end}}>{{.Name}} ({{rank .GoR}})</option>{{end}}
+        </select>
+      </div>
+      <div>
+        <label>Brett</label>
+        <select name="board" class="bigselect" required>
+          <option value="9"  {{if eq .Selected.Board "9"}}selected{{end}}>9×9</option>
+          <option value="13" {{if eq .Selected.Board "13"}}selected{{end}}>13×13</option>
+          <option value="19" {{if eq .Selected.Board "19"}}selected{{end}}>19×19</option>
+        </select>
+      </div>
+    </div>
+    <p><button class="btn bigbtn" type="submit">Vorgabe berechnen</button></p>
+  </form>
+
+  {{if .Recommendation}}
+  <div class="rec-box">
+    <strong>{{.Recommendation.BlackPlayer.Name}}</strong> spielt <strong>Schwarz</strong>,
+    <strong>{{.Recommendation.WhitePlayer.Name}}</strong> spielt <strong>Weiß</strong>.<br>
+    Vorgabe: <strong>{{.Recommendation.Stones}} Steine</strong>,
+    Komi: <strong>{{printf "%.1f" .Recommendation.Komi}}</strong>
+    (Brett {{.Recommendation.Board}}).
+  </div>
+  {{end}}
+</div>
+
+<!-- ───────────── 2. Spiel eintragen ───────────── -->
+<div class="play-card">
+  <h2>2. Spiel eintragen</h2>
+  <form method="post" action="/g/{{.Group.Slug}}/play/record">
+    <div class="row">
+      <div>
+        <label>Schwarz</label>
+        <select name="black" class="bigselect" required>
+          <option value="">— wählen —</option>
+          {{range .Players}}<option value="{{.ID}}" {{if eq .ID $.Selected.BlackID}}selected{{end}}>{{.Name}} ({{rank .GoR}})</option>{{end}}
+        </select>
+      </div>
+      <div>
+        <label>Weiß</label>
+        <select name="white" class="bigselect" required>
+          <option value="">— wählen —</option>
+          {{range .Players}}<option value="{{.ID}}" {{if eq .ID $.Selected.WhiteID}}selected{{end}}>{{.Name}} ({{rank .GoR}})</option>{{end}}
+        </select>
+      </div>
+      <div>
+        <label>Brett</label>
+        <select name="board" class="bigselect" required>
+          <option value="9"  {{if eq .Selected.BoardGame "9"}}selected{{end}}>9×9</option>
+          <option value="13" {{if eq .Selected.BoardGame "13"}}selected{{end}}>13×13</option>
+          <option value="19" {{if eq .Selected.BoardGame "19"}}selected{{end}}>19×19</option>
+        </select>
+      </div>
+      <div>
+        <label>Vorgabe (Steine)</label>
+        <input name="handicap" type="number" class="bigselect" min="0" max="9" value="{{if .Selected.HandicapOK}}{{.Selected.Handicap}}{{else}}0{{end}}" required>
+      </div>
+    </div>
+    <div class="winrow">
+      <span>Sieger:</span>
+      <label><input type="radio" name="winner" value="black" required> Schwarz</label>
+      <label><input type="radio" name="winner" value="white"> Weiß</label>
+    </div>
+    <p style="margin-top:1rem"><button class="btn bigbtn" type="submit">Spiel eintragen</button></p>
+    <p class="muted-small">Komi wird automatisch gesetzt (6,5 ohne Vorgabe, sonst 0,5).</p>
+  </form>
+</div>
+
+<!-- ───────────── 3. Neuer Spieler ───────────── -->
+<div class="play-card">
+  <h2>3. Neuer Spieler</h2>
+  <form method="post" action="/g/{{.Group.Slug}}/play/players">
+    <div class="row">
+      <div>
+        <label>Name</label>
+        <input name="name" class="bigselect" required>
+      </div>
+      <div>
+        <label>Rang (geschätzt, optional)</label>
+        <input name="rank" class="bigselect" placeholder="z.B. 25k">
+      </div>
+    </div>
+    <p><button class="btn bigbtn secondary" type="submit">Hinzufügen</button></p>
+  </form>
+</div>
+
+<!-- ───────────── Letzte Partien ───────────── -->
+{{if .RecentGames}}
+<div class="play-card">
+  <h2>Letzte Partien</h2>
+  <table>
+    <tr><th>Zeit</th><th>Schwarz</th><th>Weiß</th><th>Brett</th><th>Vorgabe</th><th>Sieger</th></tr>
+    {{range .RecentGames}}
+    <tr>
+      <td>{{.PlayedAt.Format "15:04"}}</td>
+      <td>{{playerName $.PlayerNames .BlackPlayerID}}</td>
+      <td>{{playerName $.PlayerNames .WhitePlayerID}}</td>
+      <td>{{.BoardSize}}</td>
+      <td>{{.Handicap}}</td>
+      <td>{{.Winner}}</td>
+    </tr>
+    {{end}}
+  </table>
+</div>
+{{end}}
+{{end}}
+{{template "layout" .}}

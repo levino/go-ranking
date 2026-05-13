@@ -15,9 +15,7 @@
 {{end}}
 </table>
 {{else}}
-<p class="muted">Noch keine Spieler. Über MCP-Tool <code>add_player</code> anlegen.</p>
+<p class="muted">Noch keine Spieler. Über die <a href="/g/{{.Group.Slug}}/play">Spielen-Seite</a> oder via MCP anlegen.</p>
 {{end}}
-
-<p class="muted">Spieler werden via MCP verwaltet: <code>add_player</code>, <code>update_player</code> mit <code>group: "{{.Group.Slug}}"</code>.</p>
 {{end}}
 {{template "layout" .}}

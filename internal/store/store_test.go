@@ -87,56 +87,39 @@ func TestPlayerCRUD(t *testing.T) {
 	}
 }
 
-func TestSessionAndGames(t *testing.T) {
+func TestRecordGameUpdatesRatingsAtomically(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
 	g, _ := st.CreateGroup(ctx, "x", "X")
 	p1, _ := st.CreatePlayer(ctx, g.ID, "P1", 1000)
 	p2, _ := st.CreatePlayer(ctx, g.ID, "P2", 800)
 
-	snap := []SnapshotEntry{
-		{PlayerID: p1.ID, Number: 1, Name: "P1", GoR: 1000},
-		{PlayerID: p2.ID, Number: 2, Name: "P2", GoR: 800},
-	}
-	sess, err := st.CreateSession(ctx, g.ID, "lucky-fox", snap)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := st.SessionByPassphrase(ctx, "lucky-fox")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got.Snapshot) != 2 || got.Snapshot[0].Name != "P1" {
-		t.Fatalf("snapshot bad: %+v", got.Snapshot)
-	}
-
-	// Insert a game; player ratings should be updated atomically.
-	g1 := Game{
-		SessionID: sess.ID, BlackPlayerID: p2.ID, WhitePlayerID: p1.ID,
+	gm := Game{
+		GroupID: g.ID, BlackPlayerID: p2.ID, WhitePlayerID: p1.ID,
 		BoardSize: rating.Board13, Handicap: 2, Komi: 0.5, Winner: "black",
 		BlackGoRBefore: 800, WhiteGoRBefore: 1000,
 		BlackGoRAfter: 850, WhiteGoRAfter: 970,
 	}
-	if _, err := st.RecordGame(ctx, g1); err != nil {
+	if _, err := st.RecordGame(ctx, gm); err != nil {
 		t.Fatal(err)
 	}
-
-	updated, _ := st.PlayerByID(ctx, p2.ID)
-	if updated.GoR != 850 {
-		t.Fatalf("p2 GoR not updated: %.1f", updated.GoR)
+	if u, _ := st.PlayerByID(ctx, p2.ID); u.GoR != 850 {
+		t.Fatalf("p2 GoR not updated: %.1f", u.GoR)
 	}
-	updated2, _ := st.PlayerByID(ctx, p1.ID)
-	if updated2.GoR != 970 {
-		t.Fatalf("p1 GoR not updated: %.1f", updated2.GoR)
+	if u, _ := st.PlayerByID(ctx, p1.ID); u.GoR != 970 {
+		t.Fatalf("p1 GoR not updated: %.1f", u.GoR)
 	}
 
-	games, err := st.ListGamesBySession(ctx, sess.ID)
+	games, err := st.ListRecentGames(ctx, g.ID, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(games) != 1 {
-		t.Fatalf("got %d games", len(games))
+		t.Fatalf("expected 1 game, got %d", len(games))
+	}
+	pg, _ := st.ListGamesByPlayer(ctx, p1.ID)
+	if len(pg) != 1 {
+		t.Fatalf("ListGamesByPlayer = %d", len(pg))
 	}
 }
 

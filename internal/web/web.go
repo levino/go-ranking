@@ -4,7 +4,6 @@ package web
 import (
 	"context"
 	"embed"
-	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/levino/go-ranking/internal/auth"
-	"github.com/levino/go-ranking/internal/pdfgen"
 	"github.com/levino/go-ranking/internal/rating"
 	"github.com/levino/go-ranking/internal/service"
 	"github.com/levino/go-ranking/internal/store"
@@ -74,7 +72,7 @@ func (s *Server) loadTemplates() error {
 			return fmt.Sprintf("#%d", id)
 		},
 	}
-	pages := []string{"index", "dashboard", "players", "sessions", "session", "admin"}
+	pages := []string{"index", "dashboard", "players", "play", "admin"}
 	s.tmpls = map[string]*template.Template{}
 	for _, p := range pages {
 		t, err := template.New(p).Funcs(funcs).ParseFS(tmplFS,
@@ -88,8 +86,9 @@ func (s *Server) loadTemplates() error {
 	return nil
 }
 
-// Handler returns the root mux. The web UI is intentionally read-only —
-// every mutation goes through the MCP server (the only writer).
+// Handler returns the root mux. The web UI serves both an admin view
+// (rankings, history) and a tablet-friendly "play" page where the kids
+// pick pairings and record results live during the session.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -101,10 +100,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /g/{slug}", s.requireGroupAdmin(s.handleDashboard))
 	mux.HandleFunc("GET /g/{slug}/admins", s.requireGroupAdmin(s.handleAdminsGET))
 	mux.HandleFunc("GET /g/{slug}/players", s.requireGroupAdmin(s.handlePlayersGET))
-	mux.HandleFunc("GET /g/{slug}/sessions", s.requireGroupAdmin(s.handleSessionsGET))
-	mux.HandleFunc("GET /g/{slug}/sessions/{pass}", s.requireGroupAdmin(s.handleSessionShow))
-	mux.HandleFunc("GET /g/{slug}/sessions/{pass}/matrix.pdf", s.requireGroupAdmin(s.handleMatrixPDF))
-	mux.HandleFunc("GET /g/{slug}/sessions/{pass}/scorecard.pdf", s.requireGroupAdmin(s.handleScoreCardPDF))
+
+	// Tablet UI — picks, recommends, records, adds players on the fly.
+	mux.HandleFunc("GET /g/{slug}/play", s.requireGroupAdmin(s.handlePlay))
+	mux.HandleFunc("POST /g/{slug}/play/record", s.requireGroupAdmin(s.handleRecordGame))
+	mux.HandleFunc("POST /g/{slug}/play/players", s.requireGroupAdmin(s.handleAddPlayer))
 
 	return s.withAuth(mux)
 }
@@ -119,15 +119,28 @@ type pageContext struct {
 	Admins []store.User
 	MCPURL string
 	// per-page extras
-	Players      []store.Player
-	Sessions     []store.Session
-	Session      *store.Session
-	GameCounts   map[int64]int
-	RecentGames  []store.Game
-	Games        []store.Game
-	PlayerNames  map[int64]string
-	SessionCount int
-	GameCount    int
+	Players     []store.Player
+	RecentGames []store.Game
+	PlayerNames map[int64]string
+	GameCount   int
+
+	// Play page extras.
+	Recommendation *service.Recommendation
+	Flash          string
+	Selected       playSelection
+}
+
+// playSelection echoes the previous picks so we can re-render the form
+// with the same choices in place (e.g. after computing a recommendation).
+type playSelection struct {
+	P1ID       int64
+	P2ID       int64
+	Board      string
+	Handicap   int
+	BlackID    int64
+	WhiteID    int64
+	BoardGame  string
+	HandicapOK bool
 }
 
 // withAuth attaches the authenticated user, if any, to the request.
@@ -323,25 +336,18 @@ func (s *Server) handleAdminsGET(w http.ResponseWriter, r *http.Request, g *stor
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	players, _ := s.Service.Store.ListPlayers(r.Context(), g.ID, true)
 	games, _ := s.Service.Store.ListRecentGames(r.Context(), g.ID, 25)
-	sess, _ := s.Service.Store.ListSessions(r.Context(), g.ID)
 	pn := map[int64]string{}
 	for _, p := range players {
 		pn[p.ID] = p.Name
 	}
-	gameCount := 0
-	for _, sx := range sess {
-		gs, _ := s.Service.Store.ListGamesBySession(r.Context(), sx.ID)
-		gameCount += len(gs)
-	}
 	s.render(w, "dashboard", pageContext{
-		Title:        g.Name,
-		User:         userOf(r),
-		Group:        g,
-		Players:      players,
-		RecentGames:  games,
-		PlayerNames:  pn,
-		SessionCount: len(sess),
-		GameCount:    gameCount,
+		Title:       g.Name,
+		User:        userOf(r),
+		Group:       g,
+		Players:     players,
+		RecentGames: games,
+		PlayerNames: pn,
+		GameCount:   len(games),
 	})
 }
 
@@ -350,78 +356,125 @@ func (s *Server) handlePlayersGET(w http.ResponseWriter, r *http.Request, g *sto
 	s.render(w, "players", pageContext{Title: "Spieler", User: userOf(r), Group: g, Players: players})
 }
 
-func (s *Server) handleSessionsGET(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	sess, _ := s.Service.Store.ListSessions(r.Context(), g.ID)
-	counts := map[int64]int{}
-	for _, sx := range sess {
-		gs, _ := s.Service.Store.ListGamesBySession(r.Context(), sx.ID)
-		counts[sx.ID] = len(gs)
-	}
-	s.render(w, "sessions", pageContext{Title: "Sessions", User: userOf(r), Group: g, Sessions: sess, GameCounts: counts})
-}
-
-func (s *Server) handleSessionShow(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	sess, err := s.lookupSession(r, g)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	games, _ := s.Service.Store.ListGamesBySession(r.Context(), sess.ID)
+// handlePlay renders the tablet UI. Three sub-flows on one page:
+//
+//   1. Just GET — render the empty form.
+//   2. GET ?action=recommend&p1=&p2=&board= — render with the
+//      computed handicap recommendation pre-filled into the record form.
+//
+// Recording and adding players are POSTs to separate sub-routes.
+func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	players, _ := s.Service.Store.ListPlayers(r.Context(), g.ID, false)
+	games, _ := s.Service.Store.ListRecentGames(r.Context(), g.ID, 8)
 	pn := map[int64]string{}
-	for _, e := range sess.Snapshot {
-		pn[e.PlayerID] = e.Name
+	for _, p := range players {
+		pn[p.ID] = p.Name
 	}
-	s.render(w, "session", pageContext{Title: sess.Passphrase, User: userOf(r), Group: g,
-		Session: sess, Games: games, PlayerNames: pn})
+
+	ctx := pageContext{
+		Title:       "Spielen — " + g.Name,
+		User:        userOf(r),
+		Group:       g,
+		Players:     players,
+		RecentGames: games,
+		PlayerNames: pn,
+	}
+	if r.URL.Query().Get("flash") != "" {
+		ctx.Flash = r.URL.Query().Get("flash")
+	}
+
+	if r.URL.Query().Get("action") == "recommend" {
+		p1, _ := parseInt64(r.URL.Query().Get("p1"))
+		p2, _ := parseInt64(r.URL.Query().Get("p2"))
+		boardStr := r.URL.Query().Get("board")
+		board, berr := rating.ParseBoardSize(boardStr)
+		if p1 == 0 || p2 == 0 || p1 == p2 || berr != nil {
+			ctx.Flash = "Bitte zwei verschiedene Spieler und eine Brettgröße auswählen."
+			s.render(w, "play", ctx)
+			return
+		}
+		rec, err := s.Service.Recommend(r.Context(), p1, p2, board)
+		if err != nil {
+			ctx.Flash = "Fehler: " + err.Error()
+			s.render(w, "play", ctx)
+			return
+		}
+		ctx.Recommendation = rec
+		ctx.Selected = playSelection{
+			P1ID: p1, P2ID: p2, Board: boardStr,
+			BlackID: rec.BlackPlayer.ID, WhiteID: rec.WhitePlayer.ID,
+			Handicap: rec.Stones, BoardGame: boardStr, HandicapOK: true,
+		}
+	}
+
+	s.render(w, "play", ctx)
 }
 
-func (s *Server) handleMatrixPDF(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	sess, err := s.lookupSession(r, g)
-	if err != nil {
-		http.NotFound(w, r)
+func (s *Server) handleRecordGame(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), 400)
 		return
 	}
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(
-		`inline; filename="matrix-%s.pdf"`, sess.Passphrase))
-	err = pdfgen.Matrix(w, sess.Snapshot, pdfgen.MatrixOptions{
-		GroupName:  g.Name,
-		Passphrase: sess.Passphrase,
-		Date:       sess.CreatedAt.Format("02.01.2006"),
-		Boards:     []rating.BoardSize{rating.Board9, rating.Board13},
-	})
+	black, _ := parseInt64(r.FormValue("black"))
+	white, _ := parseInt64(r.FormValue("white"))
+	handicap, _ := parseInt64(r.FormValue("handicap"))
+	winner := r.FormValue("winner")
+	board, err := rating.ParseBoardSize(r.FormValue("board"))
 	if err != nil {
-		log.Printf("matrix pdf: %v", err)
-	}
-}
-
-func (s *Server) handleScoreCardPDF(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	sess, err := s.lookupSession(r, g)
-	if err != nil {
-		http.NotFound(w, r)
+		http.Error(w, err.Error(), 400)
 		return
 	}
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(
-		`inline; filename="scorecard-%s.pdf"`, sess.Passphrase))
-	err = pdfgen.ScoreCard(w, sess.Snapshot, pdfgen.ScoreCardOptions{
-		GroupName:  g.Name,
-		Passphrase: sess.Passphrase,
-		Date:       sess.CreatedAt.Format("02.01.2006"),
-	})
-	if err != nil {
-		log.Printf("scorecard pdf: %v", err)
+	if black == 0 || white == 0 || (winner != "black" && winner != "white") {
+		http.Error(w, "missing required field", 400)
+		return
 	}
+	gm, err := s.Service.RecordGame(r.Context(), g.ID, black, white, board, int(handicap), winner == "black")
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	bp, _ := s.Service.Store.PlayerByID(r.Context(), gm.BlackPlayerID)
+	wp, _ := s.Service.Store.PlayerByID(r.Context(), gm.WhitePlayerID)
+	flash := fmt.Sprintf("%s vs %s — %s gewinnt.", bp.Name, wp.Name, winnerName(winner, bp, wp))
+	http.Redirect(w, r, "/g/"+g.Slug+"/play?flash="+url.QueryEscape(flash), http.StatusFound)
 }
 
-func (s *Server) lookupSession(r *http.Request, g *store.Group) (*store.Session, error) {
-	pass := r.PathValue("pass")
-	sess, err := s.Service.Store.SessionByPassphrase(r.Context(), pass)
-	if err != nil {
-		return nil, err
+func (s *Server) handleAddPlayer(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
 	}
-	if sess.GroupID != g.ID {
-		return nil, errors.New("session not in this group")
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		http.Error(w, "name required", 400)
+		return
 	}
-	return sess, nil
+	gor := 100.0
+	if rk := strings.TrimSpace(r.FormValue("rank")); rk != "" {
+		v, err := rating.FromRank(rk)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		gor = v
+	}
+	if _, err := s.Service.Store.CreatePlayer(r.Context(), g.ID, name, gor); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	http.Redirect(w, r, "/g/"+g.Slug+"/play?flash="+url.QueryEscape(name+" hinzugefügt."), http.StatusFound)
 }
+
+func winnerName(winner string, b, w *store.Player) string {
+	if winner == "black" {
+		return b.Name
+	}
+	return w.Name
+}
+
+func parseInt64(s string) (int64, error) {
+	var v int64
+	_, err := fmt.Sscanf(s, "%d", &v)
+	return v, err
+}
+
