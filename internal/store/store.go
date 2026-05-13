@@ -27,18 +27,22 @@ type Store struct {
 
 // Open opens (or creates) the SQLite database at path and applies the
 // schema.  Foreign keys and WAL are enabled for concurrent reads.
+//
+// Order matters: the v1→v2 migration runs FIRST, before schema.sql,
+// because schema.sql's CREATE INDEX idx_games_group references the new
+// group_id column that the migration adds.
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1) // SQLite single-writer
-	if _, err := db.Exec(schemaSQL); err != nil {
-		return nil, fmt.Errorf("schema: %w", err)
-	}
 	s := &Store{DB: db}
 	if err := s.migrate(context.Background()); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if _, err := db.Exec(schemaSQL); err != nil {
+		return nil, fmt.Errorf("schema: %w", err)
 	}
 	return s, nil
 }
