@@ -2,65 +2,140 @@ package mcp
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/levino/go-ranking/internal/auth"
 	"github.com/levino/go-ranking/internal/service"
 	"github.com/levino/go-ranking/internal/store"
 )
 
-// Server holds dependencies for handling MCP RPCs.
+// Server is an MCP HTTP endpoint that authenticates callers via OAuth
+// 2.0 bearer tokens issued by an OIDC authorization server (Zitadel).
+// On 401 it emits the RFC 9728 WWW-Authenticate header pointing at the
+// resource-metadata document, which MCP clients use to discover the
+// authorization server.
 type Server struct {
-	Service *service.Service
+	Service  *service.Service
+	OIDC     *auth.OIDC
+	Resource string // canonical public URL of this MCP endpoint
 
-	// AuthToken is a shared bearer token; empty disables auth and the
-	// server falls back to MCPUser (useful for tests).
-	AuthToken string
+	// userinfo cache to avoid hitting Zitadel on every MCP call.
+	// Tokens are typically valid for ~1h; we cache for 60s so that
+	// revocations propagate quickly but the hot path stays fast.
+	cacheTTL time.Duration
+	mu       sync.Mutex
+	cache    map[string]cachedUser
+}
 
-	// MCPUser is the OIDC subject the shared token acts as. Every tool
-	// call is checked against this user's group admin memberships. Must
-	// be set whenever AuthToken is set.
-	MCPUser string
+type cachedUser struct {
+	user *store.User
+	exp  time.Time
+}
+
+// userCtxKey is the context key for the authenticated user. Tools read
+// the caller from request context rather than from a server field.
+type userCtxKey struct{}
+
+func userFromCtx(ctx context.Context) (*store.User, bool) {
+	u, ok := ctx.Value(userCtxKey{}).(*store.User)
+	return u, ok
 }
 
 // Handler returns an http.Handler that serves the MCP endpoint at /mcp.
+// The protected-resource discovery endpoint is served separately by the
+// root mux (see cmd/server/main.go) because it lives at /.well-known/...
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /mcp", s.handleRPC)
-	mux.HandleFunc("GET /mcp", s.handleSSEStream) // optional server stream
+	mux.HandleFunc("GET /mcp", s.handleSSEStream)
 	return mux
 }
 
-func (s *Server) authorize(r *http.Request) bool {
-	if s.AuthToken == "" {
-		return true
-	}
-	got := r.Header.Get("Authorization")
-	got = strings.TrimPrefix(got, "Bearer ")
-	return subtle.ConstantTimeCompare([]byte(got), []byte(s.AuthToken)) == 1
+// HandleProtectedResource serves the RFC 9728 protected-resource
+// metadata document. Register this on the root mux at
+// `/.well-known/oauth-protected-resource`.
+func (s *Server) HandleProtectedResource(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"resource":                 s.Resource,
+		"authorization_servers":    []string{s.OIDC.Issuer},
+		"bearer_methods_supported": []string{"header"},
+		"scopes_supported":         []string{"openid", "email", "profile"},
+	})
 }
 
-// callerUser resolves the user the current request acts as. In phase 1
-// the user is fixed (MCPUser). When OAuth lands, this will inspect the
-// access token claims instead.
-func (s *Server) callerUser(ctx context.Context) (*store.User, error) {
-	if s.MCPUser == "" {
-		return nil, fmt.Errorf("MCP user not configured (set GO_LIGA_MCP_USER)")
+// authenticate resolves the request's Bearer token to a user. It calls
+// Zitadel's userinfo endpoint (which acts as a validation oracle: a
+// successful response means the token is valid and not revoked) and
+// upserts the user record from the resulting claims.
+func (s *Server) authenticate(r *http.Request) (*store.User, error) {
+	h := r.Header.Get("Authorization")
+	if !strings.HasPrefix(h, "Bearer ") {
+		return nil, errors.New("missing bearer")
 	}
-	u, err := s.Service.Store.UserByOIDC(ctx, s.MCPUser)
+	tok := strings.TrimPrefix(h, "Bearer ")
+	if tok == "" {
+		return nil, errors.New("empty bearer")
+	}
+	if u := s.cacheLookup(tok); u != nil {
+		return u, nil
+	}
+	info, err := s.OIDC.Userinfo(r.Context(), tok)
 	if err != nil {
-		return nil, fmt.Errorf("configured MCP user %q not in DB — log in via the web UI once to create the record", s.MCPUser)
+		return nil, fmt.Errorf("userinfo: %w", err)
 	}
-	return u, nil
+	user, err := s.Service.Store.UpsertUserByOIDC(r.Context(), info.Subject, info.Email, info.DisplayName())
+	if err != nil {
+		return nil, err
+	}
+	s.cacheStore(tok, user)
+	return user, nil
+}
+
+func (s *Server) cacheLookup(tok string) *store.User {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.cache[tok]
+	if !ok || time.Now().After(c.exp) {
+		return nil
+	}
+	return c.user
+}
+
+func (s *Server) cacheStore(tok string, u *store.User) {
+	ttl := s.cacheTTL
+	if ttl == 0 {
+		ttl = 60 * time.Second
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cache == nil {
+		s.cache = map[string]cachedUser{}
+	}
+	s.cache[tok] = cachedUser{user: u, exp: time.Now().Add(ttl)}
+}
+
+// unauthorized writes a spec-compliant 401 response that points MCP
+// clients at the resource-metadata document, so they can discover the
+// authorization server and initiate the OAuth flow.
+func (s *Server) unauthorized(w http.ResponseWriter, reason string) {
+	metaURL := strings.TrimSuffix(s.Resource, "/mcp") + "/.well-known/oauth-protected-resource"
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf(
+		`Bearer realm="%s", resource_metadata="%s"`, s.OIDC.Issuer, metaURL))
+	http.Error(w, "unauthorized: "+reason, http.StatusUnauthorized)
 }
 
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(r) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	user, err := s.authenticate(r)
+	if err != nil {
+		s.unauthorized(w, err.Error())
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
@@ -68,6 +143,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, nil, codeParseError, err.Error())
 		return
 	}
+	ctx := context.WithValue(r.Context(), userCtxKey{}, user)
 	trimmed := strings.TrimSpace(string(body))
 	wantSSE := strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 	if strings.HasPrefix(trimmed, "[") {
@@ -78,7 +154,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		}
 		var out []Response
 		for _, req := range batch {
-			if resp := s.dispatch(r.Context(), req); resp != nil {
+			if resp := s.dispatch(ctx, req); resp != nil {
 				out = append(out, *resp)
 			}
 		}
@@ -90,7 +166,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, nil, codeParseError, err.Error())
 		return
 	}
-	resp := s.dispatch(r.Context(), req)
+	resp := s.dispatch(ctx, req)
 	if resp == nil {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -99,8 +175,8 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSSEStream(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(r) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, err := s.authenticate(r); err != nil {
+		s.unauthorized(w, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -184,9 +260,9 @@ func (s *Server) dispatch(ctx context.Context, req Request) *Response {
 // resolveAdminGroup loads the group referenced by args and verifies the
 // caller is one of its admins.
 func (s *Server) resolveAdminGroup(ctx context.Context, args map[string]any) (*store.Group, *store.User, error) {
-	user, err := s.callerUser(ctx)
-	if err != nil {
-		return nil, nil, err
+	user, ok := userFromCtx(ctx)
+	if !ok {
+		return nil, nil, errors.New("no caller in context")
 	}
 	slug, _ := args["group"].(string)
 	if slug == "" {
@@ -196,7 +272,7 @@ func (s *Server) resolveAdminGroup(ctx context.Context, args map[string]any) (*s
 	if err != nil {
 		return nil, nil, fmt.Errorf("unknown group: %s", slug)
 	}
-	ok, err := s.Service.Store.IsGroupAdmin(ctx, user.ID, g.ID)
+	ok, err = s.Service.Store.IsGroupAdmin(ctx, user.ID, g.ID)
 	if err != nil {
 		return nil, nil, err
 	}

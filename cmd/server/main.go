@@ -7,11 +7,12 @@
 //	GO_LIGA_LISTEN               HTTP listen address (default: :8080)
 //	GO_LIGA_SIGNING_KEY          HMAC key for session cookies (required, >= 32 bytes hex)
 //	GO_LIGA_OIDC_ISSUER          OIDC issuer URL (e.g. https://id.levinkeller.de)
-//	GO_LIGA_OIDC_CLIENT_ID       OIDC client id from Zitadel
-//	GO_LIGA_OIDC_CLIENT_SECRET   OIDC client secret from Zitadel
+//	GO_LIGA_OIDC_CLIENT_ID       OIDC client id (web app) from Zitadel
+//	GO_LIGA_OIDC_CLIENT_SECRET   OIDC client secret (web app) from Zitadel
 //	GO_LIGA_OIDC_REDIRECT_URL    e.g. https://ranking.go-ag.levinkeller.de/auth/callback
-//	GO_LIGA_MCP_TOKEN            Bearer token gating /mcp (phase 1)
-//	GO_LIGA_MCP_USER             OIDC subject the MCP token acts as (required if MCP_TOKEN set)
+//
+// The MCP endpoint authenticates callers via OAuth bearer tokens issued
+// by the same OIDC issuer; no shared MCP secret is needed.
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -75,16 +77,24 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("web init: %w", err)
 	}
+
+	// MCP endpoint URL: derive from the OIDC redirect URL stem.
+	mcpResource, err := deriveResourceURL(oidcCfg.RedirectURL)
+	if err != nil {
+		return fmt.Errorf("derive MCP resource URL: %w", err)
+	}
 	mcpSrv := &mcp.Server{
-		Service:   svc,
-		AuthToken: os.Getenv("GO_LIGA_MCP_TOKEN"),
-		MCPUser:   os.Getenv("GO_LIGA_MCP_USER"),
+		Service:  svc,
+		OIDC:     oidcCfg,
+		Resource: mcpResource,
 	}
 
-	// Compose root mux: /mcp -> mcpSrv, everything else -> webSrv.
+	// Compose root mux: /mcp -> mcpSrv, /.well-known/oauth-protected-resource
+	// -> mcpSrv's discovery handler, /healthz, everything else -> webSrv.
 	root := http.NewServeMux()
 	root.Handle("/mcp", mcpSrv.Handler())
 	root.Handle("/mcp/", mcpSrv.Handler())
+	root.HandleFunc("GET /.well-known/oauth-protected-resource", mcpSrv.HandleProtectedResource)
 	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -109,12 +119,22 @@ func run() error {
 		close(idle)
 	}()
 
-	log.Printf("go-liga listening on %s", listen)
+	log.Printf("go-liga listening on %s (MCP at %s)", listen, mcpResource)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	<-idle
 	return nil
+}
+
+// deriveResourceURL takes the configured OIDC redirect URL and returns
+// the canonical /mcp endpoint URL on the same origin.
+func deriveResourceURL(redirectURL string) (string, error) {
+	u, err := url.Parse(redirectURL)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("cannot parse redirect URL %q", redirectURL)
+	}
+	return u.Scheme + "://" + u.Host + "/mcp", nil
 }
 
 func envOr(k, def string) string {
