@@ -19,8 +19,7 @@ spec:
         app.kubernetes.io/name: go-liga
     spec:
       serviceAccountName: go-liga
-      imagePullSecrets:
-        - name: ghcr-pull-secret
+      # ghcr.io/levino/go-ranking is a public image — no imagePullSecrets needed.
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
