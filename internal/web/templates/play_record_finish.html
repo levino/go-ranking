@@ -8,6 +8,7 @@
 }
 .finish-side {
   flex: 1 1 240px;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: .8rem;
@@ -15,6 +16,13 @@
   border-radius: 14px;
   background: var(--paper-2);
   border: 2px solid var(--line);
+}
+@media (max-width: 640px) {
+  .finish-vs { gap: .5rem; margin: .5rem 0 1rem; }
+  .finish-side { flex: 1 1 calc(50% - .25rem); padding: .6rem .7rem; gap: .5rem; border-radius: 12px; }
+  .finish-side .stone { width: 36px; height: 36px; flex-shrink: 0; }
+  .finish-side .name { font-size: .95rem; }
+  .finish-side .muted { font-size: .65rem !important; }
 }
 .finish-side .stone {
   width: 54px; height: 54px; border-radius: 50%;
@@ -39,6 +47,15 @@
   border-radius: 18px;
   padding: 1.2rem 1.4rem;
   margin: 1.2rem 0 1.8rem;
+}
+@media (max-width: 640px) {
+  .handicap-tuner { padding: .9rem 1rem; margin: 1rem 0 1.2rem; border-radius: 14px; }
+  .tune-display { font-size: 1.5rem; min-width: 60px; }
+  .tune-btn { width: 40px; height: 40px; font-size: 1.2rem; }
+  .tune-label { min-width: 70px; font-size: .95rem; }
+  .winner-row { gap: .6rem; }
+  .winner-btn { padding: 1rem .6rem; font-size: 1.1rem; border-width: 2px; border-radius: 14px; }
+  .winner-btn .stone { width: 40px; height: 40px; }
 }
 .handicap-tuner h3 {
   font-family: 'Fraunces', serif;

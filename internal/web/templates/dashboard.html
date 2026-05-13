@@ -1,8 +1,27 @@
 {{define "content"}}
+<style>
+.dash-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .8rem;
+  margin-bottom: .8rem;
+}
+.dash-title h1 { margin: 0; }
+@media (max-width: 640px) {
+  .dash-title { gap: .6rem; }
+  .dash-title .btn { width: 100%; }
+  .row { gap: .6rem; }
+  .kpi { padding: .7rem .9rem; }
+  .kpi .v { font-size: 1.6rem; }
+}
+</style>
 <nav class="breadcrumb"><a href="/">Start</a> · {{.Group.Name}}</nav>
-<h1>{{.Group.Name}}
-  <a class="btn" style="float:right" href="/g/{{.Group.Slug}}/play">Spielen</a>
-</h1>
+<div class="dash-title">
+  <h1>{{.Group.Name}}</h1>
+  <a class="btn" href="/g/{{.Group.Slug}}/play">Spielen</a>
+</div>
 
 <div class="row">
   <div class="kpi"><div class="muted">Spieler</div><div class="v">{{len .Players}}</div></div>
@@ -11,6 +30,7 @@
 
 <h2>Rangliste</h2>
 {{if .Players}}
+<div class="table-scroll">
 <table>
 <tr><th>#</th><th>Name</th><th>GoR</th><th>Rang</th><th>Status</th></tr>
 {{range $i, $p := .Players}}
@@ -23,10 +43,12 @@
 </tr>
 {{end}}
 </table>
+</div>
 {{else}}<p class="muted">Noch keine Spieler.</p>{{end}}
 
 <h2>Letzte Partien</h2>
 {{if .RecentGames}}
+<div class="table-scroll">
 <table>
 <tr><th>Datum</th><th>Schwarz</th><th>Weiß</th><th>Brett</th><th>Vorgabe</th><th>Komi</th><th>Sieger</th><th>Δ Schwarz</th><th>Δ Weiß</th></tr>
 {{range .RecentGames}}
@@ -43,6 +65,7 @@
 </tr>
 {{end}}
 </table>
+</div>
 {{else}}<p class="muted">Noch keine Partien.</p>{{end}}
 {{end}}
 {{template "layout" .}}
