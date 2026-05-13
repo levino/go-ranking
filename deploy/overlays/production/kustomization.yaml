@@ -6,4 +6,4 @@ resources:
   - sealed-secret.yaml
 images:
   - name: ghcr.io/levino/go-ranking
-    newTag: 45e8a85c674409c24e6d206a5511049aacf0531a
+    newTag: e115cac4f05624a043d3aedf683e1f1548fbfcc3
