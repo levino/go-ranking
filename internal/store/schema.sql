@@ -41,6 +41,24 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_group ON sessions(group_id);
 
+CREATE TABLE IF NOT EXISTS oauth_clients (
+    client_id     TEXT PRIMARY KEY,
+    client_name   TEXT,
+    redirect_uris TEXT NOT NULL, -- JSON array of strings
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS oauth_codes (
+    code           TEXT PRIMARY KEY,
+    client_id      TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    redirect_uri   TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    expires_at     TEXT NOT NULL,
+    consumed       INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_codes_expires ON oauth_codes(expires_at);
+
 CREATE TABLE IF NOT EXISTS games (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

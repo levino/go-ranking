@@ -39,6 +39,37 @@ type providerConfig struct {
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserinfoEndpoint      string `json:"userinfo_endpoint"`
 	EndSessionEndpoint    string `json:"end_session_endpoint"`
+	JWKSURI               string `json:"jwks_uri"`
+}
+
+// ProviderConfig is the public, immutable view of the OIDC provider's
+// metadata document. Callers that need to know the upstream endpoints
+// (e.g. an OAuth proxy) use Discover().
+type ProviderConfig struct {
+	Issuer                string
+	AuthorizationEndpoint string
+	TokenEndpoint         string
+	UserinfoEndpoint      string
+	EndSessionEndpoint    string
+	JWKSURI               string
+}
+
+// Discover returns the upstream OIDC provider metadata, cached for an
+// hour. Used by the OAuth proxy in internal/mcp to point Claude.ai at
+// Zitadel's authorization and token endpoints.
+func (o *OIDC) Discover(ctx context.Context) (*ProviderConfig, error) {
+	cfg, err := o.discover(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ProviderConfig{
+		Issuer:                cfg.Issuer,
+		AuthorizationEndpoint: cfg.AuthorizationEndpoint,
+		TokenEndpoint:         cfg.TokenEndpoint,
+		UserinfoEndpoint:      cfg.UserinfoEndpoint,
+		EndSessionEndpoint:    cfg.EndSessionEndpoint,
+		JWKSURI:               cfg.JWKSURI,
+	}, nil
 }
 
 // UserInfo is the subset of OIDC userinfo claims we care about.

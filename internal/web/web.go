@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/levino/go-ranking/internal/auth"
@@ -37,8 +38,9 @@ type Server struct {
 type ctxKey string
 
 const (
-	userKey      ctxKey = "user"
-	oidcStateCookie       = "go_liga_oidc_state"
+	userKey         ctxKey = "user"
+	oidcStateCookie        = "go_liga_oidc_state"
+	returnToCookie         = "go_liga_return_to"
 )
 
 func New(s *service.Service, signer *auth.Signer, oidc *auth.OIDC) (*Server, error) {
@@ -223,6 +225,20 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   300, // 5 min to complete the flow
 	})
+	// Allow a return_to so e.g. /oauth/authorize can bounce here and
+	// come back after login. Path-only — never an absolute URL — to
+	// stop us from doubling as an open redirector.
+	if rt := r.URL.Query().Get("return_to"); strings.HasPrefix(rt, "/") {
+		http.SetCookie(w, &http.Cookie{
+			Name:     returnToCookie,
+			Value:    rt,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   300,
+		})
+	}
 	url, err := s.OIDC.AuthURL(r.Context(), state)
 	if err != nil {
 		http.Error(w, "OIDC discovery failed: "+err.Error(), 500)
@@ -274,7 +290,15 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusFound)
+	dest := "/"
+	if c, err := r.Cookie(returnToCookie); err == nil && strings.HasPrefix(c.Value, "/") {
+		dest = c.Value
+		http.SetCookie(w, &http.Cookie{
+			Name: returnToCookie, Path: "/", MaxAge: -1, HttpOnly: true,
+			Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode,
+		})
+	}
+	http.Redirect(w, r, dest, http.StatusFound)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

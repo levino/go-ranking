@@ -11,8 +11,11 @@
 //	GO_LIGA_OIDC_CLIENT_SECRET   OIDC client secret (web app) from Zitadel
 //	GO_LIGA_OIDC_REDIRECT_URL    e.g. https://ranking.go-ag.levinkeller.de/auth/callback
 //
-// The MCP endpoint authenticates callers via OAuth bearer tokens issued
-// by the same OIDC issuer; no shared MCP secret is needed.
+// The MCP endpoint is its own OAuth 2.1 authorization server (with
+// Dynamic Client Registration) for MCP clients like Claude.ai. It
+// rides on top of the OIDC session: the upstream IdP (Zitadel)
+// authenticates the human, our AS issues short-lived JWTs scoped to
+// the MCP resource.
 package main
 
 import (
@@ -85,16 +88,23 @@ func run() error {
 	}
 	mcpSrv := &mcp.Server{
 		Service:  svc,
+		Signer:   signer,
 		OIDC:     oidcCfg,
 		Resource: mcpResource,
 	}
 
-	// Compose root mux: /mcp -> mcpSrv, /.well-known/oauth-protected-resource
-	// -> mcpSrv's discovery handler, /healthz, everything else -> webSrv.
+	// Compose root mux. The MCP endpoint and all OAuth-facade endpoints
+	// need CORS to be callable from a browser-based MCP client.
 	root := http.NewServeMux()
-	root.Handle("/mcp", mcpSrv.Handler())
-	root.Handle("/mcp/", mcpSrv.Handler())
-	root.HandleFunc("GET /.well-known/oauth-protected-resource", mcpSrv.HandleProtectedResource)
+	root.Handle("/mcp", mcp.CORS(mcpSrv.Handler()))
+	root.Handle("/mcp/", mcp.CORS(mcpSrv.Handler()))
+	root.Handle("/.well-known/oauth-protected-resource",
+		mcp.CORS(http.HandlerFunc(mcpSrv.HandleProtectedResource)))
+	root.Handle("/.well-known/oauth-authorization-server",
+		mcp.CORS(http.HandlerFunc(mcpSrv.HandleAuthServerMetadata)))
+	root.Handle("/oauth/register", mcp.CORS(http.HandlerFunc(mcpSrv.HandleRegister)))
+	root.Handle("/oauth/authorize", mcp.CORS(http.HandlerFunc(mcpSrv.HandleAuthorize)))
+	root.Handle("/oauth/token", mcp.CORS(http.HandlerFunc(mcpSrv.HandleToken)))
 	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
