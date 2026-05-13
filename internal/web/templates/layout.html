@@ -53,8 +53,6 @@ nav.breadcrumb a { color: var(--acc); text-decoration: none; }
   </div>
 </header>
 <main>
-  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
-  {{if .Error}}<div class="flash error">{{.Error}}</div>{{end}}
   {{block "content" .}}{{end}}
 </main>
 </body>
