@@ -2,33 +2,20 @@
 <nav class="breadcrumb"><a href="/">Start</a> / <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> / Admins</nav>
 <h1>{{.Group.Name}} — Admins</h1>
 
-<h2>Aktuelle Admins</h2>
 {{if .Admins}}
 <table>
-  <thead><tr><th>Name</th><th>E-Mail</th><th></th></tr></thead>
+  <thead><tr><th>Name</th><th>E-Mail</th></tr></thead>
   <tbody>
   {{range .Admins}}
     <tr>
       <td>{{if .Name}}{{.Name}}{{else}}<span class="muted">—</span>{{end}}</td>
       <td>{{.Email}}</td>
-      <td>
-        <form method="post" action="/g/{{$.Group.Slug}}/admins/remove" class="inline">
-          <input type="hidden" name="user_id" value="{{.ID}}">
-          <button class="btn danger" type="submit">entfernen</button>
-        </form>
-      </td>
     </tr>
   {{end}}
   </tbody>
 </table>
 {{end}}
 
-<h2>Co-Admin hinzufügen</h2>
-<p class="muted">Die Person muss sich vorher mindestens einmal über id.levinkeller.de eingeloggt haben (dann existiert ihr Account hier).</p>
-<form method="post" action="/g/{{.Group.Slug}}/admins/add">
-  <label>E-Mail des bestehenden Users</label>
-  <input name="email" type="email" required>
-  <p><button class="btn" type="submit">Hinzufügen</button></p>
-</form>
+<p class="muted">Admin-Verwaltung läuft über den MCP-Server: <code>add_admin</code> bzw. <code>remove_admin</code> mit <code>group: "{{.Group.Slug}}"</code> und der E-Mail des Users.</p>
 {{end}}
 {{template "layout" .}}

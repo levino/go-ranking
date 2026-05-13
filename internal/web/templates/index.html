@@ -10,22 +10,14 @@
 {{end}}
 </ul>
 {{else}}
-<p class="muted">Du administrierst noch keine Gruppe.</p>
+<p class="muted">Du administrierst noch keine Gruppe. Lege eine über den MCP-Server an (Tool <code>create_group</code>).</p>
 {{end}}
 
-<h2>Neue Gruppe anlegen</h2>
-<form method="post" action="/groups">
-  <div class="row">
-    <div>
-      <label>Slug (URL-Kürzel)</label>
-      <input name="slug" required pattern="[a-z0-9-]+" placeholder="z.b. go-ag-hannover">
-    </div>
-    <div>
-      <label>Name</label>
-      <input name="name" required placeholder="Go-AG Hannover">
-    </div>
-  </div>
-  <p><button class="btn" type="submit">Gruppe anlegen</button></p>
-</form>
+<h2>MCP-Server</h2>
+<p class="muted">Alle Änderungen (Gruppen, Spieler, Sessions, Ergebnisse) laufen über den MCP-Server. URL für Claude.ai:</p>
+<p><code id="mcp-url" style="display:inline-block;padding:.4rem .6rem;background:#fff;border:1px solid var(--bd);border-radius:4px;user-select:all">{{.MCPURL}}</code>
+<button class="btn secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('mcp-url').innerText)">kopieren</button></p>
+<p class="muted">Auth: Bearer-Token (wurde dir beim Setup ausgegeben). Auth-Modus „OAuth/Bearer-Token" in Claude.ai.</p>
+<p class="muted">Verfügbare Tools: <code>list_my_groups</code>, <code>create_group</code>, <code>add_admin</code>, <code>remove_admin</code>, <code>add_player</code>, <code>update_player</code>, <code>list_players</code>, <code>ranking</code>, <code>create_session</code>, <code>list_sessions</code>, <code>get_session</code>, <code>record_game</code>.</p>
 {{end}}
 {{template "layout" .}}

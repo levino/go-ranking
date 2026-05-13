@@ -9,7 +9,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"strconv"
+	"net/url"
 	"time"
 
 	"github.com/levino/go-ranking/internal/auth"
@@ -27,6 +27,11 @@ type Server struct {
 	Signer  *auth.Signer
 	OIDC    *auth.OIDC
 	tmpls   map[string]*template.Template
+
+	// mcpURL is the public URL of the /mcp endpoint, derived from the
+	// OIDC redirect URL on init. Shown on the index page so users can
+	// copy it into Claude.ai without hunting for the host.
+	mcpURL string
 }
 
 type ctxKey string
@@ -38,10 +43,21 @@ const (
 
 func New(s *service.Service, signer *auth.Signer, oidc *auth.OIDC) (*Server, error) {
 	srv := &Server{Service: s, Signer: signer, OIDC: oidc}
+	srv.mcpURL = deriveMCPURL(oidc.RedirectURL)
 	if err := srv.loadTemplates(); err != nil {
 		return nil, err
 	}
 	return srv, nil
+}
+
+// deriveMCPURL produces the public /mcp URL from the OIDC redirect URL
+// (which is the only canonical public origin we have on hand).
+func deriveMCPURL(redirectURL string) string {
+	u, err := url.Parse(redirectURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/mcp"
 }
 
 func (s *Server) loadTemplates() error {
@@ -70,7 +86,8 @@ func (s *Server) loadTemplates() error {
 	return nil
 }
 
-// Handler returns the root mux.
+// Handler returns the root mux. The web UI is intentionally read-only —
+// every mutation goes through the MCP server (the only writer).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -79,17 +96,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	mux.HandleFunc("POST /logout", s.handleLogout)
 
-	mux.HandleFunc("POST /groups", s.requireUser(s.handleCreateGroup))
-
 	mux.HandleFunc("GET /g/{slug}", s.requireGroupAdmin(s.handleDashboard))
 	mux.HandleFunc("GET /g/{slug}/admins", s.requireGroupAdmin(s.handleAdminsGET))
-	mux.HandleFunc("POST /g/{slug}/admins/add", s.requireGroupAdmin(s.handleAdminAdd))
-	mux.HandleFunc("POST /g/{slug}/admins/remove", s.requireGroupAdmin(s.handleAdminRemove))
 	mux.HandleFunc("GET /g/{slug}/players", s.requireGroupAdmin(s.handlePlayersGET))
-	mux.HandleFunc("POST /g/{slug}/players", s.requireGroupAdmin(s.handlePlayersPOST))
-	mux.HandleFunc("POST /g/{slug}/players/{id}", s.requireGroupAdmin(s.handlePlayerUpdate))
 	mux.HandleFunc("GET /g/{slug}/sessions", s.requireGroupAdmin(s.handleSessionsGET))
-	mux.HandleFunc("POST /g/{slug}/sessions", s.requireGroupAdmin(s.handleSessionsPOST))
 	mux.HandleFunc("GET /g/{slug}/sessions/{pass}", s.requireGroupAdmin(s.handleSessionShow))
 	mux.HandleFunc("GET /g/{slug}/sessions/{pass}/matrix.pdf", s.requireGroupAdmin(s.handleMatrixPDF))
 	mux.HandleFunc("GET /g/{slug}/sessions/{pass}/scorecard.pdf", s.requireGroupAdmin(s.handleScoreCardPDF))
@@ -103,10 +113,9 @@ type pageContext struct {
 	Title  string
 	User   *store.User
 	Group  *store.Group
-	Flash  string
-	Error  string
 	Groups []store.Group
 	Admins []store.User
+	MCPURL string
 	// per-page extras
 	Players      []store.Player
 	Sessions     []store.Session
@@ -138,16 +147,6 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 func userOf(r *http.Request) *store.User {
 	u, _ := r.Context().Value(userKey).(*store.User)
 	return u
-}
-
-func (s *Server) requireUser(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if userOf(r) == nil {
-			http.Redirect(w, r, "/login", http.StatusFound)
-			return
-		}
-		h(w, r)
-	}
 }
 
 func (s *Server) requireGroupAdmin(h func(w http.ResponseWriter, r *http.Request, g *store.Group)) http.HandlerFunc {
@@ -201,7 +200,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	s.render(w, "index", pageContext{Title: "Start", User: u, Groups: groups})
+	s.render(w, "index", pageContext{Title: "Start", User: u, Groups: groups, MCPURL: s.mcpURL})
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
@@ -288,87 +287,13 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
-func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	u := userOf(r)
-	slug := r.FormValue("slug")
-	name := r.FormValue("name")
-	if slug == "" || name == "" {
-		http.Error(w, "slug and name required", 400)
-		return
-	}
-	g, err := s.Service.CreateGroupWithSlug(r.Context(), slug, name)
-	if err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	if err := s.Service.Store.AddGroupAdmin(r.Context(), u.ID, g.ID); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	http.Redirect(w, r, "/g/"+g.Slug, http.StatusFound)
-}
-
 func (s *Server) handleAdminsGET(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	admins, err := s.Service.Store.ListGroupAdmins(r.Context(), g.ID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	s.render(w, "admin", pageContext{Title: g.Name + " — Admins", User: userOf(r), Group: g, Admins: admins})
-}
-
-func (s *Server) handleAdminAdd(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	email := r.FormValue("email")
-	if email == "" {
-		http.Error(w, "email required", 400)
-		return
-	}
-	target, err := s.Service.Store.UserByEmail(r.Context(), email)
-	if err != nil {
-		http.Error(w, "user with that email has not logged in yet", 404)
-		return
-	}
-	if err := s.Service.Store.AddGroupAdmin(r.Context(), target.ID, g.ID); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	http.Redirect(w, r, "/g/"+g.Slug+"/admins", http.StatusFound)
-}
-
-func (s *Server) handleAdminRemove(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	uidStr := r.FormValue("user_id")
-	uid, err := strconv.ParseInt(uidStr, 10, 64)
-	if err != nil {
-		http.Error(w, "bad user_id", 400)
-		return
-	}
-	me := userOf(r)
-	if uid == me.ID {
-		// Prevent locking yourself out: only allow if there's at least
-		// one other admin left.
-		admins, _ := s.Service.Store.ListGroupAdmins(r.Context(), g.ID)
-		if len(admins) <= 1 {
-			http.Error(w, "cannot remove the last admin of a group", 400)
-			return
-		}
-	}
-	if err := s.Service.Store.RemoveGroupAdmin(r.Context(), uid, g.ID); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	http.Redirect(w, r, "/g/"+g.Slug+"/admins", http.StatusFound)
+	s.render(w, "admin", pageContext{Title: g.Name + " — Admins", User: userOf(r), Group: g, Admins: admins, MCPURL: s.mcpURL})
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -401,60 +326,6 @@ func (s *Server) handlePlayersGET(w http.ResponseWriter, r *http.Request, g *sto
 	s.render(w, "players", pageContext{Title: "Spieler", User: userOf(r), Group: g, Players: players})
 }
 
-func (s *Server) handlePlayersPOST(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	name := r.FormValue("name")
-	if name == "" {
-		http.Error(w, "name required", 400)
-		return
-	}
-	gor := 100.0
-	if rk := r.FormValue("rank"); rk != "" {
-		v, err := rating.FromRank(rk)
-		if err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-		gor = v
-	}
-	if _, err := s.Service.Store.CreatePlayer(r.Context(), g.ID, name, gor); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	http.Redirect(w, r, "/g/"+g.Slug+"/players", http.StatusFound)
-}
-
-func (s *Server) handlePlayerUpdate(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "bad id", 400)
-		return
-	}
-	p, err := s.Service.Store.PlayerByID(r.Context(), id)
-	if err != nil || p.GroupID != g.ID {
-		http.Error(w, "not found", 404)
-		return
-	}
-	active := r.FormValue("active") == "1"
-	name := r.FormValue("name")
-	if name == "" {
-		name = p.Name
-	}
-	if err := s.Service.Store.UpdatePlayer(r.Context(), id, name, active); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	http.Redirect(w, r, "/g/"+g.Slug+"/players", http.StatusFound)
-}
-
 func (s *Server) handleSessionsGET(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	sess, _ := s.Service.Store.ListSessions(r.Context(), g.ID)
 	counts := map[int64]int{}
@@ -463,15 +334,6 @@ func (s *Server) handleSessionsGET(w http.ResponseWriter, r *http.Request, g *st
 		counts[sx.ID] = len(gs)
 	}
 	s.render(w, "sessions", pageContext{Title: "Sessions", User: userOf(r), Group: g, Sessions: sess, GameCounts: counts})
-}
-
-func (s *Server) handleSessionsPOST(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	sess, err := s.Service.CreateSession(r.Context(), g.ID)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	http.Redirect(w, r, "/g/"+g.Slug+"/sessions/"+sess.Passphrase, http.StatusFound)
 }
 
 func (s *Server) handleSessionShow(w http.ResponseWriter, r *http.Request, g *store.Group) {
