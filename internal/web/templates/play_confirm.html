@@ -1,0 +1,46 @@
+{{define "content"}}
+<style>
+.confirm-card { background:#fff; border:1px solid var(--bd); border-radius:8px; padding:1.5rem; margin:1rem 0; }
+.confirm-card h1 { margin-top:0; }
+.confirm-row { font-size:1.4rem; padding:.8rem 0; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; }
+.confirm-row:last-child { border-bottom:none; }
+.confirm-row strong { font-size:1.6rem; }
+.btn.big { font-size:1.3rem; padding:1rem 2rem; }
+.btn-row { display:flex; gap:1rem; margin-top:1.5rem; }
+</style>
+
+<div class="confirm-card">
+  <h1>Spiel eintragen?</h1>
+  <div class="confirm-row">
+    <span>Schwarz</span>
+    <strong>{{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}</strong>
+  </div>
+  <div class="confirm-row">
+    <span>Weiß</span>
+    <strong>{{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}</strong>
+  </div>
+  <div class="confirm-row">
+    <span>Brett</span>
+    <strong>{{.Recommendation.Board}}</strong>
+  </div>
+  <div class="confirm-row">
+    <span>Vorgabe</span>
+    <strong>{{.Recommendation.Stones}} Steine, Komi {{printf "%.1f" .Recommendation.Komi}}</strong>
+  </div>
+  <div class="confirm-row">
+    <span>Sieger</span>
+    <strong>{{if eq .Flash "black"}}Schwarz — {{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}{{else}}Weiß — {{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}{{end}}</strong>
+  </div>
+
+  <form method="post" action="/g/{{.Group.Slug}}/play/record/confirm" class="btn-row">
+    <input type="hidden" name="black"    value="{{.Selected.BlackID}}">
+    <input type="hidden" name="white"    value="{{.Selected.WhiteID}}">
+    <input type="hidden" name="board"    value="{{.Selected.BoardGame}}">
+    <input type="hidden" name="handicap" value="{{.Selected.Handicap}}">
+    <input type="hidden" name="winner"   value="{{.Flash}}">
+    <button class="btn big" type="submit">Ja, eintragen</button>
+    <a class="btn big secondary" href="/g/{{.Group.Slug}}/play">Abbrechen</a>
+  </form>
+</div>
+{{end}}
+{{template "layout" .}}

@@ -6,6 +6,9 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"image"
+	"image/color"
+	"image/png"
 	"log"
 	"net/http"
 	"net/url"
@@ -72,7 +75,7 @@ func (s *Server) loadTemplates() error {
 			return fmt.Sprintf("#%d", id)
 		},
 	}
-	pages := []string{"index", "dashboard", "players", "play", "admin"}
+	pages := []string{"index", "dashboard", "players", "play", "play_confirm", "admin"}
 	s.tmpls = map[string]*template.Template{}
 	for _, p := range pages {
 		t, err := template.New(p).Funcs(funcs).ParseFS(tmplFS,
@@ -103,8 +106,18 @@ func (s *Server) Handler() http.Handler {
 
 	// Tablet UI — picks, recommends, records, adds players on the fly.
 	mux.HandleFunc("GET /g/{slug}/play", s.requireGroupAdmin(s.handlePlay))
-	mux.HandleFunc("POST /g/{slug}/play/record", s.requireGroupAdmin(s.handleRecordGame))
+	// /record is the preview step (renders a confirmation page).
+	// /record/confirm is the commit step (actually inserts the game).
+	mux.HandleFunc("POST /g/{slug}/play/record", s.requireGroupAdmin(s.handleRecordPreview))
+	mux.HandleFunc("POST /g/{slug}/play/record/confirm", s.requireGroupAdmin(s.handleRecordCommit))
 	mux.HandleFunc("POST /g/{slug}/play/players", s.requireGroupAdmin(s.handleAddPlayer))
+
+	// PWA manifest and icon (served at the origin root so iOS finds them
+	// without a per-group prefix). http.ServeMux's path patterns only
+	// support whole-segment wildcards, so the sizes are wired explicitly.
+	mux.HandleFunc("GET /manifest.webmanifest", s.handleManifest)
+	mux.HandleFunc("GET /icon-192.png", s.iconHandler(192))
+	mux.HandleFunc("GET /icon-512.png", s.iconHandler(512))
 
 	return s.withAuth(mux)
 }
@@ -410,7 +423,64 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request, g *store.Gro
 	s.render(w, "play", ctx)
 }
 
-func (s *Server) handleRecordGame(w http.ResponseWriter, r *http.Request, g *store.Group) {
+// handleRecordPreview is the first POST step: parse + validate the
+// submitted game, look up player names, render a confirmation page
+// that re-submits the same fields (plus a CSRF-ish token if we cared,
+// which we don't here — same-origin POSTs only).
+func (s *Server) handleRecordPreview(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	black, _ := parseInt64(r.FormValue("black"))
+	white, _ := parseInt64(r.FormValue("white"))
+	handicap, _ := parseInt64(r.FormValue("handicap"))
+	winner := r.FormValue("winner")
+	board, err := rating.ParseBoardSize(r.FormValue("board"))
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if black == 0 || white == 0 || (winner != "black" && winner != "white") {
+		http.Error(w, "missing required field", 400)
+		return
+	}
+	bp, err := s.Service.Store.PlayerByID(r.Context(), black)
+	if err != nil || bp.GroupID != g.ID {
+		http.Error(w, "unknown black player", 400)
+		return
+	}
+	wp, err := s.Service.Store.PlayerByID(r.Context(), white)
+	if err != nil || wp.GroupID != g.ID {
+		http.Error(w, "unknown white player", 400)
+		return
+	}
+	pn := map[int64]string{bp.ID: bp.Name, wp.ID: wp.Name}
+	s.render(w, "play_confirm", pageContext{
+		Title:       "Bestätigen — " + g.Name,
+		User:        userOf(r),
+		Group:       g,
+		PlayerNames: pn,
+		Selected: playSelection{
+			BlackID:    bp.ID,
+			WhiteID:    wp.ID,
+			BoardGame:  fmt.Sprintf("%d", board),
+			Handicap:   int(handicap),
+			HandicapOK: true,
+		},
+		Recommendation: &service.Recommendation{
+			BlackPlayer: bp,
+			WhitePlayer: wp,
+			Board:       board,
+			Stones:      int(handicap),
+			Komi:        komiFor(int(handicap)),
+		},
+		Flash: winner, // re-use Flash to thread the winner through
+	})
+}
+
+// handleRecordCommit is the second POST step: actually insert the game.
+func (s *Server) handleRecordCommit(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -437,6 +507,15 @@ func (s *Server) handleRecordGame(w http.ResponseWriter, r *http.Request, g *sto
 	wp, _ := s.Service.Store.PlayerByID(r.Context(), gm.WhitePlayerID)
 	flash := fmt.Sprintf("%s vs %s — %s gewinnt.", bp.Name, wp.Name, winnerName(winner, bp, wp))
 	http.Redirect(w, r, "/g/"+g.Slug+"/play?flash="+url.QueryEscape(flash), http.StatusFound)
+}
+
+// komiFor mirrors service.defaultKomi (which is unexported) so the
+// confirmation page can show what komi will be used.
+func komiFor(stones int) float64 {
+	if stones == 0 {
+		return 6.5
+	}
+	return 0.5
 }
 
 func (s *Server) handleAddPlayer(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -476,5 +555,80 @@ func parseInt64(s string) (int64, error) {
 	var v int64
 	_, err := fmt.Sscanf(s, "%d", &v)
 	return v, err
+}
+
+// ---- PWA -----------------------------------------------------------------
+
+// handleManifest serves the Web App Manifest. iOS reads name/short_name
+// and the apple-touch-icon link (in layout.html) to render a tidy home
+// screen icon when the user picks "Add to Home Screen".
+func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/manifest+json")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write([]byte(`{
+  "name": "Go-Liga",
+  "short_name": "Go-Liga",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fafafa",
+  "theme_color": "#1c5d99",
+  "icons": [
+    {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}`))
+}
+
+// iconHandler returns a handler that synthesises a PWA icon at the
+// given size: a black Go stone (with a small highlight) on a white
+// background. Generated on the fly with image/png — no asset files.
+func (s *Server) iconHandler(size int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		img := drawStoneIcon(size)
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_ = png.Encode(w, img)
+	}
+}
+
+func drawStoneIcon(size int) image.Image {
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	bg := color.RGBA{0xfa, 0xfa, 0xfa, 0xff}
+	stone := color.RGBA{0x1e, 0x1e, 0x1e, 0xff}
+	highlight := color.RGBA{0x70, 0x70, 0x70, 0xff}
+	// Fill background.
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			img.Set(x, y, bg)
+		}
+	}
+	cx, cy := size/2, size/2
+	r := size/2 - size/16 // small margin
+	r2 := r * r
+	// Stone — solid black circle.
+	for y := cy - r; y <= cy+r; y++ {
+		for x := cx - r; x <= cx+r; x++ {
+			dx, dy := x-cx, y-cy
+			if dx*dx+dy*dy <= r2 {
+				img.Set(x, y, stone)
+			}
+		}
+	}
+	// Highlight — a smaller grey disc offset top-left, giving the stone
+	// a faint sense of volume on iOS dock backgrounds.
+	hr := size / 6
+	hcx, hcy := cx-r/3, cy-r/3
+	hr2 := hr * hr
+	for y := hcy - hr; y <= hcy+hr; y++ {
+		for x := hcx - hr; x <= hcx+hr; x++ {
+			dx, dy := x-hcx, y-hcy
+			if dx*dx+dy*dy <= hr2 {
+				img.Set(x, y, highlight)
+			}
+		}
+	}
+	return img
 }
 
