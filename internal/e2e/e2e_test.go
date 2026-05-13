@@ -121,7 +121,7 @@ func (r *rig) loginAs(subject, email, name string) (*http.Client, *store.User, s
 	return c, u, tok
 }
 
-// ---- MCP-driven CRUD: full lifecycle -------------------------------------
+// ---- MCP-driven CRUD: lifecycle without sessions ------------------------
 
 func TestEndToEndMCPLifecycle(t *testing.T) {
 	rg := newRig(t)
@@ -151,20 +151,25 @@ func TestEndToEndMCPLifecycle(t *testing.T) {
 		t.Fatalf("expected 3 active players, got %d", len(active))
 	}
 
-	out := mustToolOK(t, rg, ownerTok, "create_session", map[string]any{"group": "g1"})
-	pass := extractPassphrase(t, out)
-
-	mustToolOK(t, rg, ownerTok, "record_game", map[string]any{
-		"passphrase":   pass,
-		"black_number": 2,
-		"white_number": 1,
-		"board_size":   "13",
-		"winner":       "black",
+	// Recommend handicap → ensures Ben (15k) plays Black against Anna (10k).
+	out := mustToolOK(t, rg, ownerTok, "recommend_handicap", map[string]any{
+		"group": "g1", "player_a": "Anna", "player_b": "Ben", "board": "13",
 	})
+	if !strings.Contains(out, "Ben spielt Schwarz") {
+		t.Errorf("recommend should put Ben as Black: %s", out)
+	}
 
-	out = mustToolOK(t, rg, ownerTok, "list_sessions", map[string]any{"group": "g1"})
-	if !strings.Contains(out, pass) || !strings.Contains(out, "1 Partien") {
-		t.Errorf("list_sessions output not as expected: %s", out)
+	// Record a game with a manual handicap of 4.
+	out = mustToolOK(t, rg, ownerTok, "record_game", map[string]any{
+		"group": "g1", "black": "Ben", "white": "Anna",
+		"board": "13", "handicap": 4, "winner": "black",
+	})
+	if !strings.Contains(out, "Eingetragen") {
+		t.Errorf("record_game output unexpected: %s", out)
+	}
+	games, _ := rg.svc.Store.ListRecentGames(context.Background(), g.ID, 10)
+	if len(games) != 1 {
+		t.Fatalf("expected 1 game stored, got %d", len(games))
 	}
 
 	_, _, _ = rg.loginAs("oidc-co", "co@example.com", "Co")
@@ -186,49 +191,65 @@ func TestEndToEndMCPLifecycle(t *testing.T) {
 	}
 }
 
-// ---- Web UI is read-only -------------------------------------------------
+// ---- Tablet UI: full flow on a single page ------------------------------
 
-func TestWebUIReadOnly(t *testing.T) {
+func TestTabletPlayFlow(t *testing.T) {
 	rg := newRig(t)
 	owner, _, ownerTok := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
 	mustToolOK(t, rg, ownerTok, "create_group", map[string]any{"slug": "g1", "name": "Group One"})
 	mustToolOK(t, rg, ownerTok, "add_player", map[string]any{"group": "g1", "name": "Anna", "rank": "10k"})
-	mustToolOK(t, rg, ownerTok, "create_session", map[string]any{"group": "g1"})
-
-	resp, err := owner.Get(rg.srv.URL + "/g/g1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != 200 || !bytes.Contains(body, []byte("Anna")) {
-		t.Fatalf("dashboard %d, body %s", resp.StatusCode, body)
-	}
+	mustToolOK(t, rg, ownerTok, "add_player", map[string]any{"group": "g1", "name": "Ben", "rank": "15k"})
 
 	g, _ := rg.svc.Store.GroupBySlug(context.Background(), "g1")
-	sess, _ := rg.svc.Store.ListSessions(context.Background(), g.ID)
-	pass := sess[0].Passphrase
-	for _, suffix := range []string{"matrix.pdf", "scorecard.pdf"} {
-		u := rg.srv.URL + "/g/g1/sessions/" + pass + "/" + suffix
-		resp, err := owner.Get(u)
-		if err != nil {
-			t.Fatal(err)
+	players, _ := rg.svc.Store.ListPlayers(context.Background(), g.ID, true)
+	var anna, ben *store.Player
+	for i := range players {
+		switch players[i].Name {
+		case "Anna":
+			anna = &players[i]
+		case "Ben":
+			ben = &players[i]
 		}
-		b, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != 200 {
-			t.Fatalf("%s status %d", suffix, resp.StatusCode)
-		}
-		if !bytes.HasPrefix(b, []byte("%PDF-")) {
-			t.Fatalf("%s not a PDF", suffix)
-		}
+	}
+
+	// Pairing calculator
+	u := fmt.Sprintf("%s/g/g1/play?action=recommend&p1=%d&p2=%d&board=13", rg.srv.URL, anna.ID, ben.ID)
+	resp, _ := owner.Get(u)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !bytes.Contains(body, []byte("Ben")) || !bytes.Contains(body, []byte("Schwarz")) {
+		t.Errorf("recommendation not rendered: %s", body)
+	}
+
+	// Add new player inline
+	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/players", url.Values{
+		"name": {"Spontaneous Kid"}, "rank": {"30k"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("add player: %d", resp.StatusCode)
+	}
+	all, _ := rg.svc.Store.ListPlayers(context.Background(), g.ID, true)
+	if len(all) != 3 {
+		t.Fatalf("expected 3 players after add, got %d", len(all))
+	}
+
+	// Record a game
+	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/record", url.Values{
+		"black": {fmt.Sprintf("%d", ben.ID)}, "white": {fmt.Sprintf("%d", anna.ID)},
+		"board": {"13"}, "handicap": {"4"}, "winner": {"black"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("record_game form: %d", resp.StatusCode)
+	}
+	games, _ := rg.svc.Store.ListRecentGames(context.Background(), g.ID, 10)
+	if len(games) != 1 {
+		t.Fatalf("expected 1 game, got %d", len(games))
 	}
 
 	stranger, _, _ := rg.loginAs("oidc-stranger", "stranger@example.com", "Stranger")
-	resp, err = stranger.Get(rg.srv.URL + "/g/g1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp, _ = stranger.Get(rg.srv.URL + "/g/g1/play")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("stranger expected 403, got %d", resp.StatusCode)
@@ -380,12 +401,3 @@ func mustToolOK(t *testing.T, rg *rig, token, name string, args map[string]any) 
 	return sb.String()
 }
 
-func extractPassphrase(t *testing.T, createSessionOutput string) string {
-	t.Helper()
-	line := strings.SplitN(createSessionOutput, "\n", 2)[0]
-	pass := strings.TrimSpace(strings.TrimPrefix(line, "Neue Session: "))
-	if pass == "" {
-		t.Fatalf("could not parse passphrase from %q", createSessionOutput)
-	}
-	return pass
-}

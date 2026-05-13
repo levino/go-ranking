@@ -6,7 +6,7 @@
 {{if .Groups}}
 <ul>
 {{range .Groups}}
-  <li><a href="/g/{{.Slug}}">{{.Name}}</a> <span class="muted">({{.Slug}})</span></li>
+  <li><a href="/g/{{.Slug}}">{{.Name}}</a> <span class="muted">({{.Slug}})</span> — <a class="btn" href="/g/{{.Slug}}/play">Spielen</a></li>
 {{end}}
 </ul>
 {{else}}
@@ -14,10 +14,9 @@
 {{end}}
 
 <h2>MCP-Server</h2>
-<p class="muted">Alle Änderungen (Gruppen, Spieler, Sessions, Ergebnisse) laufen über den MCP-Server. URL für Claude.ai:</p>
+<p class="muted">Verwaltungstool für Claude.ai. URL:</p>
 <p><code id="mcp-url" style="display:inline-block;padding:.4rem .6rem;background:#fff;border:1px solid var(--bd);border-radius:4px;user-select:all">{{.MCPURL}}</code>
 <button class="btn secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('mcp-url').innerText)">kopieren</button></p>
-<p class="muted">Auth: OAuth/OIDC gegen id.levinkeller.de. Claude.ai entdeckt den Auth-Server automatisch — beim ersten Verbinden öffnet sich ein Browser-Fenster zur Anmeldung. Kein Token nötig.</p>
-<p class="muted">Verfügbare Tools: <code>list_my_groups</code>, <code>create_group</code>, <code>add_admin</code>, <code>remove_admin</code>, <code>add_player</code>, <code>update_player</code>, <code>list_players</code>, <code>ranking</code>, <code>create_session</code>, <code>list_sessions</code>, <code>get_session</code>, <code>record_game</code>.</p>
+<p class="muted">Auth: OAuth/OIDC gegen id.levinkeller.de — Claude.ai entdeckt den Auth-Server selbst, beim ersten Verbinden öffnet sich ein Browser-Fenster.</p>
 {{end}}
 {{template "layout" .}}

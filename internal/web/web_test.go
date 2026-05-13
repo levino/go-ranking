@@ -155,6 +155,7 @@ func TestWebHasNoWriteEndpoints(t *testing.T) {
 	// have been removed. The mux should respond 405 (method not allowed)
 	// or 404 to any POST except /logout and /auth/*.
 	ts, _, _ := newTestWebServer(t)
+	// Routes that should NOT accept POST (old session/PDF / admin/CRUD).
 	for _, path := range []string{"/groups", "/g/g/players", "/g/g/sessions", "/g/g/admins/add"} {
 		resp, err := http.Post(ts.URL+path, "application/x-www-form-urlencoded", strings.NewReader(""))
 		if err != nil {

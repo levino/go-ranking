@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/levino/go-ranking/internal/passphrase"
 	"github.com/levino/go-ranking/internal/rating"
 	"github.com/levino/go-ranking/internal/store"
 )
@@ -31,8 +30,6 @@ func (s *Service) CreateGroup(ctx context.Context, name string) (*store.Group, e
 }
 
 // CreateGroupWithSlug creates a group using a caller-supplied slug.
-// The slug is normalized lightly (lowercase, hyphens only) to avoid
-// surprises in URLs.
 func (s *Service) CreateGroupWithSlug(ctx context.Context, slug, name string) (*store.Group, error) {
 	s2 := slugify(slug)
 	if s2 == "" {
@@ -44,67 +41,70 @@ func (s *Service) CreateGroupWithSlug(ctx context.Context, slug, name string) (*
 	return s.Store.CreateGroup(ctx, s2, name)
 }
 
-// CreateSession freezes a snapshot of the group's active players and
-// generates a fresh passphrase.  The passphrase is regenerated on the
-// (very rare) event of a uniqueness collision.
-func (s *Service) CreateSession(ctx context.Context, groupID int64) (*store.Session, error) {
-	players, err := s.Store.ListPlayers(ctx, groupID, false)
-	if err != nil {
-		return nil, err
-	}
-	snap := make([]store.SnapshotEntry, len(players))
-	for i, p := range players {
-		snap[i] = store.SnapshotEntry{
-			PlayerID: p.ID,
-			Number:   i + 1,
-			Name:     p.Name,
-			GoR:      p.GoR,
-		}
-	}
-	for try := 0; try < 5; try++ {
-		pass := passphrase.New()
-		sess, err := s.Store.CreateSession(ctx, groupID, pass, snap)
-		if err == nil {
-			return sess, nil
-		}
-		if !strings.Contains(err.Error(), "UNIQUE") {
-			return nil, err
-		}
-	}
-	return nil, errors.New("could not generate unique passphrase")
+// Recommendation is the suggested handicap/komi for a pairing at the
+// current GoR values. Black plays the weaker player (lower GoR).
+type Recommendation struct {
+	BlackPlayer *store.Player
+	WhitePlayer *store.Player
+	Board       rating.BoardSize
+	Stones      int     // handicap stones — 0 means even game
+	Komi        float64 // komi awarded to white
 }
 
-// RecordResult enters a single game in the given session, recomputing
-// both players' GoR. Vorgabe and Komi are looked up from the session
-// snapshot — the caller cannot override them.
-func (s *Service) RecordResult(ctx context.Context, sessionID, blackID, whiteID int64, board rating.BoardSize, blackWon bool) (*store.Game, error) {
-	sess, err := s.Store.SessionByID(ctx, sessionID)
+// Recommend returns the suggested handicap pairing for two players on
+// the given board. Order of the two players doesn't matter; the
+// weaker one is assigned Black.
+func (s *Service) Recommend(ctx context.Context, p1ID, p2ID int64, board rating.BoardSize) (*Recommendation, error) {
+	p1, err := s.Store.PlayerByID(ctx, p1ID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("player 1: %w", err)
 	}
-	black, white, err := s.lookupSessionPlayers(ctx, sess, blackID, whiteID)
+	p2, err := s.Store.PlayerByID(ctx, p2ID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("player 2: %w", err)
 	}
-	// Determine handicap from the SNAPSHOT GoRs (frozen at session
-	// creation), not from current player ratings.
-	bSnap, wSnap := snapshotEntry(sess, blackID), snapshotEntry(sess, whiteID)
-	if bSnap == nil || wSnap == nil {
-		return nil, fmt.Errorf("player not in session snapshot")
+	if p1.GroupID != p2.GroupID {
+		return nil, errors.New("players are in different groups")
 	}
-	stronger, weaker := wSnap.GoR, bSnap.GoR
-	if bSnap.GoR > wSnap.GoR {
-		stronger, weaker = bSnap.GoR, wSnap.GoR
+	black, white := p1, p2
+	if p1.GoR > p2.GoR {
+		black, white = p2, p1
 	}
-	h := rating.Recommended(stronger, weaker, board)
+	h := rating.Recommended(white.GoR, black.GoR, board)
+	return &Recommendation{
+		BlackPlayer: black,
+		WhitePlayer: white,
+		Board:       board,
+		Stones:      h.Stones,
+		Komi:        h.Komi,
+	}, nil
+}
 
-	// Black should be the weaker player when handicap is given. If the
-	// caller swapped colours (which is invalid in the matrix), we still
-	// rate the game with whatever the actual handicap was set to.
+// RecordGame writes a single game to the store and updates both
+// players' GoR atomically. Handicap (stones) is caller-supplied; komi
+// is auto-derived from the stones (EGF convention: 6.5 for even, 0.5
+// when handicap stones are placed). Rating bonus from handicap only
+// applies when Black is the weaker player.
+func (s *Service) RecordGame(ctx context.Context, groupID, blackID, whiteID int64, board rating.BoardSize, stones int, blackWon bool) (*store.Game, error) {
+	if blackID == whiteID {
+		return nil, errors.New("black and white must differ")
+	}
+	black, err := s.Store.PlayerByID(ctx, blackID)
+	if err != nil {
+		return nil, fmt.Errorf("black: %w", err)
+	}
+	white, err := s.Store.PlayerByID(ctx, whiteID)
+	if err != nil {
+		return nil, fmt.Errorf("white: %w", err)
+	}
+	if black.GroupID != groupID || white.GroupID != groupID {
+		return nil, errors.New("players are not in this group")
+	}
+
+	h := rating.Handicap{Stones: stones, Komi: defaultKomi(stones)}
 	hcpBonus := h.HandicapBonus(board)
-	// The bonus only applies when black is the weaker player. If black
-	// is actually stronger, the handicap is irrelevant for them.
-	if bSnap.GoR > wSnap.GoR {
+	// Bonus only applies when Black is actually the weaker player.
+	if black.GoR > white.GoR {
 		hcpBonus = 0
 	}
 
@@ -115,7 +115,7 @@ func (s *Service) RecordResult(ctx context.Context, sessionID, blackID, whiteID 
 		winner = "white"
 	}
 	g := store.Game{
-		SessionID:      sessionID,
+		GroupID:        groupID,
 		BlackPlayerID:  blackID,
 		WhitePlayerID:  whiteID,
 		BoardSize:      board,
@@ -130,44 +130,13 @@ func (s *Service) RecordResult(ctx context.Context, sessionID, blackID, whiteID 
 	return s.Store.RecordGame(ctx, g)
 }
 
-func (s *Service) lookupSessionPlayers(ctx context.Context, sess *store.Session, blackID, whiteID int64) (*store.Player, *store.Player, error) {
-	if blackID == whiteID {
-		return nil, nil, errors.New("black and white must differ")
+// defaultKomi returns the EGF-conventional komi for a given number of
+// handicap stones: 6.5 on even games, 0.5 once stones are placed.
+func defaultKomi(stones int) float64 {
+	if stones == 0 {
+		return 6.5
 	}
-	black, err := s.Store.PlayerByID(ctx, blackID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("black player: %w", err)
-	}
-	white, err := s.Store.PlayerByID(ctx, whiteID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("white player: %w", err)
-	}
-	if snapshotEntry(sess, blackID) == nil {
-		return nil, nil, fmt.Errorf("black player not in session")
-	}
-	if snapshotEntry(sess, whiteID) == nil {
-		return nil, nil, fmt.Errorf("white player not in session")
-	}
-	return black, white, nil
-}
-
-// PlayerByNumber looks up a player by their session-local number.
-func (s *Service) PlayerByNumber(sess *store.Session, number int) (*store.SnapshotEntry, error) {
-	for i := range sess.Snapshot {
-		if sess.Snapshot[i].Number == number {
-			return &sess.Snapshot[i], nil
-		}
-	}
-	return nil, fmt.Errorf("no player with number %d", number)
-}
-
-func snapshotEntry(sess *store.Session, id int64) *store.SnapshotEntry {
-	for i := range sess.Snapshot {
-		if sess.Snapshot[i].PlayerID == id {
-			return &sess.Snapshot[i]
-		}
-	}
-	return nil
+	return 0.5
 }
 
 // slugify produces a URL-safe slug for group names.
@@ -201,7 +170,6 @@ func slugify(s string) string {
 	}
 	out := strings.Trim(b.String(), "-")
 	if out == "" {
-		// fall back to something stable
 		return fmt.Sprintf("group-%d", time.Now().UnixNano())
 	}
 	return out
