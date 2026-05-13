@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/levino/go-ranking/internal/rating"
@@ -116,7 +117,7 @@ func toolDefs() []Tool {
 		},
 		{
 			Name:        "record_game",
-			Description: "Trägt eine Partie ein. Vorgabe (Steine) muss übergeben werden — Komi wird automatisch gesetzt (6.5 ohne Vorgabe, sonst 0.5). Beide Spieler-Namen müssen in der Gruppe existieren.",
+			Description: "Trägt eine Partie ein. Vorgabe (Steine) muss übergeben werden. Komi optional — wenn nicht angegeben, EGF-Standard (6.5 ohne Vorgabe, sonst 0.5). Negatives Komi (Rückkomi) ist erlaubt, vor allem auf 9x9 sinnvoll. Beide Spieler-Namen müssen in der Gruppe existieren.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -125,6 +126,7 @@ func toolDefs() []Tool {
 					"white":    map[string]any{"type": "string", "description": "Name des Weiß-Spielers."},
 					"board":    map[string]any{"type": "string", "enum": []string{"9", "13", "19"}},
 					"handicap": map[string]any{"type": "integer", "description": "Anzahl Vorgabesteine (0 für ebenes Spiel)."},
+					"komi":     map[string]any{"type": "number", "description": "Optional. Float, darf negativ sein (Rückkomi)."},
 					"winner":   map[string]any{"type": "string", "enum": []string{"black", "white"}},
 				},
 				"required": []string{"group", "black", "white", "board", "handicap", "winner"},
@@ -393,12 +395,18 @@ func (s *Server) toolRecordGame(ctx context.Context, args map[string]any) (*Tool
 	if !ok {
 		return errorResult("handicap must be an integer"), nil
 	}
+	komi := math.NaN()
+	if raw, present := args["komi"]; present && raw != nil {
+		if v, ok := floatArg(raw); ok {
+			komi = v
+		}
+	}
 	winner, _ := args["winner"].(string)
 	winner = strings.ToLower(winner)
 	if winner != "black" && winner != "white" {
 		return errorResult("winner must be 'black' or 'white'"), nil
 	}
-	gm, err := s.Service.RecordGame(ctx, g.ID, bp.ID, wp.ID, board, stones, winner == "black")
+	gm, err := s.Service.RecordGame(ctx, g.ID, bp.ID, wp.ID, board, stones, komi, winner == "black")
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
@@ -408,6 +416,22 @@ func (s *Server) toolRecordGame(ctx context.Context, args map[string]any) (*Tool
 		bp.Name, wp.Name, board, gm.Handicap, gm.Komi, gm.Winner,
 		bp.Name, gm.BlackGoRBefore, gm.BlackGoRAfter, gm.BlackGoRAfter-gm.BlackGoRBefore,
 		wp.Name, gm.WhiteGoRBefore, gm.WhiteGoRAfter, gm.WhiteGoRAfter-gm.WhiteGoRBefore)), nil
+}
+
+func floatArg(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case string:
+		var n float64
+		_, err := fmt.Sscanf(x, "%f", &n)
+		return n, err == nil
+	}
+	return 0, false
 }
 
 func numArg(v any) (int, bool) {

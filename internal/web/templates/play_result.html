@@ -1,0 +1,169 @@
+{{define "content"}}
+<style>
+.result-hero {
+  text-align: center;
+  padding: 1.5rem 0;
+}
+.result-vs {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1rem;
+  margin: 1.5rem 0 2.5rem;
+  flex-wrap: wrap;
+}
+.result-side {
+  flex: 1 1 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+  padding: 1.4rem 1.2rem;
+  border-radius: 20px;
+  background: var(--paper-2);
+  border: 2px solid var(--line);
+}
+.result-side.black { background: linear-gradient(180deg, #1f2937 0%, #111827 100%); color: white; border-color: #111827; }
+.result-side.white { background: linear-gradient(180deg, #fefce8 0%, #fef3c7 100%); border-color: #d6b87b; }
+.result-side .stone {
+  width: 88px; height: 88px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Fraunces', serif;
+  font-weight: 800;
+  font-size: 2rem;
+  letter-spacing: -.02em;
+}
+.result-side.black .stone {
+  background: radial-gradient(circle at 32% 28%, #4b5563 0%, #111827 60%);
+  color: white;
+  box-shadow: 0 8px 18px rgba(0,0,0,.4), inset 0 -4px 6px rgba(0,0,0,.4), inset 0 4px 6px rgba(255,255,255,.15);
+}
+.result-side.white .stone {
+  background: radial-gradient(circle at 32% 28%, #ffffff 0%, #e8dfb8 80%);
+  color: var(--ink);
+  box-shadow: 0 8px 18px rgba(0,0,0,.15), inset 0 -3px 5px rgba(0,0,0,.12);
+}
+.result-side .role {
+  font-family: 'Lexend Deca', sans-serif;
+  font-weight: 600;
+  font-size: .85rem;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  opacity: .75;
+}
+.result-side .name {
+  font-family: 'Fraunces', serif;
+  font-weight: 800;
+  font-size: 1.6rem;
+  text-align: center;
+  letter-spacing: -.01em;
+}
+.result-side .rank {
+  font-size: .9rem;
+  opacity: .7;
+}
+
+.handicap-card {
+  text-align: center;
+  padding: 1.6rem 1.4rem;
+  background: linear-gradient(135deg, #fff7d6 0%, #ffeaa7 100%);
+  border: 3px solid #f4d03f;
+  border-radius: 20px;
+  margin: 0 auto 2rem;
+  max-width: 480px;
+}
+.handicap-card .num {
+  font-family: 'Fraunces', serif;
+  font-size: 5rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -.04em;
+  color: var(--accent);
+}
+.handicap-card .num small {
+  font-size: 1.2rem;
+  vertical-align: super;
+  color: var(--ink);
+  font-weight: 600;
+}
+.handicap-card .label {
+  font-family: 'Lexend Deca', sans-serif;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  font-size: .9rem;
+  opacity: .8;
+  margin-bottom: .3rem;
+}
+.handicap-card .komi {
+  margin-top: .4rem;
+  font-size: 1rem;
+  color: var(--muted);
+}
+.even-pill {
+  display: inline-block;
+  padding: .4rem 1.2rem;
+  background: var(--ok);
+  color: white;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin: .8rem 0;
+}
+.cta-row {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+</style>
+
+<div class="wizard-shell">
+  <div class="wizard-stepper">
+    <span class="on"></span><span class="on"></span><span class="on"></span>
+  </div>
+  <div class="result-hero">
+    <h1 style="margin-bottom:.3rem">Hier ist die Vorgabe</h1>
+    <p class="muted">Auf {{.Recommendation.Board}}-Brett</p>
+  </div>
+
+  <div class="result-vs">
+    <div class="result-side black">
+      <div class="role">Schwarz spielt</div>
+      <div class="stone">⬤</div>
+      <div class="name">{{.Recommendation.BlackPlayer.Name}}</div>
+      <div class="rank">{{rank .Recommendation.BlackPlayer.GoR}}</div>
+    </div>
+    <div class="result-side white">
+      <div class="role">Weiß spielt</div>
+      <div class="stone">○</div>
+      <div class="name">{{.Recommendation.WhitePlayer.Name}}</div>
+      <div class="rank">{{rank .Recommendation.WhitePlayer.GoR}}</div>
+    </div>
+  </div>
+
+  <div class="handicap-card">
+    {{if eq .Recommendation.Stones 0}}
+      <div class="label">Ebenes Spiel</div>
+      <div class="even-pill">Keine Vorgabe</div>
+      <div class="komi">Komi {{printf "%.1f" .Recommendation.Komi}}</div>
+    {{else}}
+      <div class="label">Vorgabe für Schwarz</div>
+      <div class="num">{{.Recommendation.Stones}}<small>Steine</small></div>
+      <div class="komi">Komi {{printf "%.1f" .Recommendation.Komi}}</div>
+    {{end}}
+  </div>
+
+  <div class="cta-row">
+    <a class="btn huge success" href="/g/{{.Group.Slug}}/play">Alles klar</a>
+    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play/g/p1">Ergebnis eintragen</a>
+  </div>
+</div>
+{{end}}
+{{template "layout" .}}

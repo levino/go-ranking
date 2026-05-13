@@ -1,45 +1,73 @@
 {{define "content"}}
 <style>
-.confirm-card { background:#fff; border:1px solid var(--bd); border-radius:8px; padding:1.5rem; margin:1rem 0; }
-.confirm-card h1 { margin-top:0; }
-.confirm-row { font-size:1.4rem; padding:.8rem 0; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; }
-.confirm-row:last-child { border-bottom:none; }
-.confirm-row strong { font-size:1.6rem; }
-.btn.big { font-size:1.3rem; padding:1rem 2rem; }
-.btn-row { display:flex; gap:1rem; margin-top:1.5rem; }
+.confirm-shell {
+  background: var(--paper-2);
+  border: 2px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow-2);
+  padding: 2.2rem 1.8rem;
+  text-align: center;
+}
+.confirm-shell h1 { font-size: 2.4rem; margin-bottom: .3rem; }
+.confirm-shell .sub { color: var(--muted); margin-bottom: 2rem; }
+.confirm-summary {
+  text-align: left;
+  background: #fbf7e8;
+  border: 1px solid #e9ddb1;
+  border-radius: 16px;
+  padding: 1.4rem 1.6rem;
+  margin: 0 auto 2rem;
+  max-width: 540px;
+  font-size: 1.15rem;
+  line-height: 1.7;
+}
+.confirm-summary dt { color: var(--muted); font-size: .85rem; letter-spacing: .08em; text-transform: uppercase; }
+.confirm-summary dd { margin: 0 0 .8rem; font-family: 'Fraunces', serif; font-size: 1.3rem; font-weight: 700; }
+.confirm-summary dd:last-child { margin-bottom: 0; }
+.confirm-summary .winner {
+  display: inline-flex; gap: .5rem; align-items: center;
+}
+.confirm-summary .winner .stone {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.confirm-summary .winner.black .stone { background: radial-gradient(circle at 30% 28%, #4b5563 0%, #000 70%); }
+.confirm-summary .winner.white .stone { background: radial-gradient(circle at 30% 28%, #ffffff 0%, #e8dfb8 80%); border: 1.5px solid var(--ink); }
+.confirm-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
 </style>
 
-<div class="confirm-card">
-  <h1>Spiel eintragen?</h1>
-  <div class="confirm-row">
-    <span>Schwarz</span>
-    <strong>{{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}</strong>
-  </div>
-  <div class="confirm-row">
-    <span>Weiß</span>
-    <strong>{{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}</strong>
-  </div>
-  <div class="confirm-row">
-    <span>Brett</span>
-    <strong>{{.Recommendation.Board}}</strong>
-  </div>
-  <div class="confirm-row">
-    <span>Vorgabe</span>
-    <strong>{{.Recommendation.Stones}} Steine, Komi {{printf "%.1f" .Recommendation.Komi}}</strong>
-  </div>
-  <div class="confirm-row">
-    <span>Sieger</span>
-    <strong>{{if eq .Flash "black"}}Schwarz — {{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}{{else}}Weiß — {{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}{{end}}</strong>
-  </div>
+<div class="confirm-shell">
+  <h1>Wirklich eintragen?</h1>
+  <p class="sub">Schau nochmal kurz drauf.</p>
 
-  <form method="post" action="/g/{{.Group.Slug}}/play/record/confirm" class="btn-row">
-    <input type="hidden" name="black"    value="{{.Selected.BlackID}}">
-    <input type="hidden" name="white"    value="{{.Selected.WhiteID}}">
-    <input type="hidden" name="board"    value="{{.Selected.BoardGame}}">
-    <input type="hidden" name="handicap" value="{{.Selected.Handicap}}">
+  <dl class="confirm-summary">
+    <dt>Schwarz</dt>
+    <dd>{{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}</dd>
+    <dt>Weiß</dt>
+    <dd>{{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}</dd>
+    <dt>Brett</dt>
+    <dd>{{.Recommendation.Board}}</dd>
+    <dt>Vorgabe</dt>
+    <dd>{{.Recommendation.Stones}} Steine · {{komiText .Recommendation.Komi}}</dd>
+    <dt>Sieger</dt>
+    <dd>
+      {{if eq .Flash "black"}}
+      <span class="winner black"><span class="stone"></span> Schwarz — {{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}</span>
+      {{else}}
+      <span class="winner white"><span class="stone"></span> Weiß — {{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}</span>
+      {{end}}
+    </dd>
+  </dl>
+
+  <form method="post" action="/g/{{.Group.Slug}}/play/g/commit" class="confirm-cta">
+    <input type="hidden" name="black"    value="{{.Recommendation.BlackPlayer.ID}}">
+    <input type="hidden" name="white"    value="{{.Recommendation.WhitePlayer.ID}}">
+    <input type="hidden" name="board"    value="{{.Recommendation.Board}}">
+    <input type="hidden" name="handicap" value="{{.Recommendation.Stones}}">
+    <input type="hidden" name="komi"     value="{{printf "%.1f" .Recommendation.Komi}}">
     <input type="hidden" name="winner"   value="{{.Flash}}">
-    <button class="btn big" type="submit">Ja, eintragen</button>
-    <a class="btn big secondary" href="/g/{{.Group.Slug}}/play">Abbrechen</a>
+    <button class="btn huge success" type="submit">Ja, eintragen</button>
+    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play">Abbrechen</a>
   </form>
 </div>
 {{end}}

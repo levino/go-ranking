@@ -1,0 +1,210 @@
+{{define "content"}}
+<style>
+.finish-vs {
+  display: flex;
+  gap: 1rem;
+  margin: 1rem 0 1.5rem;
+  flex-wrap: wrap;
+}
+.finish-side {
+  flex: 1 1 240px;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: 1rem 1.2rem;
+  border-radius: 14px;
+  background: var(--paper-2);
+  border: 2px solid var(--line);
+}
+.finish-side .stone {
+  width: 54px; height: 54px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Fraunces', serif; font-weight: 800;
+}
+.finish-side.black .stone {
+  background: radial-gradient(circle at 30% 28%, #4b5563 0%, #111827 60%);
+  color: white;
+}
+.finish-side.white .stone {
+  background: radial-gradient(circle at 30% 28%, #ffffff 0%, #e8dfb8 80%);
+  color: var(--ink);
+}
+.finish-side .name {
+  font-family: 'Fraunces', serif; font-weight: 700; font-size: 1.2rem;
+}
+
+.handicap-tuner {
+  background: var(--paper-2);
+  border: 2px solid var(--line);
+  border-radius: 18px;
+  padding: 1.2rem 1.4rem;
+  margin: 1.2rem 0 1.8rem;
+}
+.handicap-tuner h3 {
+  font-family: 'Fraunces', serif;
+  font-size: 1.1rem;
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.tune-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .5rem 0;
+}
+.tune-row + .tune-row { border-top: 1px solid var(--line); }
+.tune-label { font-weight: 600; min-width: 100px; }
+.tune-controls {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+}
+.tune-btn {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--ink);
+  background: var(--paper-2);
+  font-family: 'Fraunces', serif;
+  font-size: 1.4rem;
+  font-weight: 800;
+  cursor: pointer;
+  line-height: 1;
+}
+.tune-btn:hover { background: var(--ink); color: white; }
+.tune-display {
+  font-family: 'Fraunces', serif;
+  font-size: 2rem;
+  font-weight: 800;
+  min-width: 80px;
+  text-align: center;
+  padding: 0 .4rem;
+}
+.tune-display input {
+  border: none;
+  font: inherit;
+  text-align: center;
+  width: 100%;
+  background: transparent;
+  padding: 0;
+}
+.tune-display input:focus { outline: 2px solid var(--ink); border-radius: 6px; }
+
+.winner-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.winner-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .5rem;
+  padding: 1.6rem 1rem;
+  border-radius: 18px;
+  border: 3px solid var(--line);
+  background: var(--paper-2);
+  font-family: 'Fraunces', serif;
+  font-size: 1.4rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform .1s ease, border-color .1s ease;
+  color: inherit;
+}
+.winner-btn .stone {
+  width: 56px; height: 56px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.winner-btn.black { background: linear-gradient(180deg, #1f2937 0%, #111827 100%); color: white; border-color: #111827; }
+.winner-btn.white { background: linear-gradient(180deg, #fefce8 0%, #fef3c7 100%); color: var(--ink); border-color: #d6b87b; }
+.winner-btn.black .stone { background: radial-gradient(circle at 30% 28%, #4b5563 0%, #000 70%); }
+.winner-btn.white .stone { background: radial-gradient(circle at 30% 28%, #ffffff 0%, #e8dfb8 80%); }
+.winner-btn:hover { transform: translateY(-3px); }
+
+.komi-hint {
+  font-size: .85rem;
+  color: var(--muted);
+  margin-top: .4rem;
+}
+</style>
+
+<form method="post" action="/g/{{.Group.Slug}}/play/g/confirm" id="finish-form">
+  <input type="hidden" name="black" value="{{.Recommendation.BlackPlayer.ID}}">
+  <input type="hidden" name="white" value="{{.Recommendation.WhitePlayer.ID}}">
+  <input type="hidden" name="board" value="{{.Recommendation.Board}}">
+
+  <div class="wizard-shell">
+    <div class="wizard-stepper">
+      <span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span>
+    </div>
+    <div class="wizard-headline">{{.Wizard.Headline}}</div>
+
+    <div class="finish-vs">
+      <div class="finish-side black">
+        <div class="stone">⬤</div>
+        <div>
+          <div class="muted" style="font-size:.8rem;letter-spacing:.1em">SCHWARZ</div>
+          <div class="name">{{.Recommendation.BlackPlayer.Name}}</div>
+        </div>
+      </div>
+      <div class="finish-side white">
+        <div class="stone">○</div>
+        <div>
+          <div class="muted" style="font-size:.8rem;letter-spacing:.1em">WEISS</div>
+          <div class="name">{{.Recommendation.WhitePlayer.Name}}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="handicap-tuner">
+      <h3>So gespielt</h3>
+      <div class="tune-row">
+        <div class="tune-label">Vorgabe</div>
+        <div class="tune-controls">
+          <button type="button" class="tune-btn" onclick="bump('handicap',-1,0,9)">−</button>
+          <div class="tune-display"><input type="number" name="handicap" id="f-handicap" value="{{.Recommendation.Stones}}" min="0" max="9" step="1" inputmode="numeric"></div>
+          <button type="button" class="tune-btn" onclick="bump('handicap',1,0,9)">+</button>
+        </div>
+      </div>
+      <div class="tune-row">
+        <div class="tune-label">Komi</div>
+        <div class="tune-controls">
+          <button type="button" class="tune-btn" onclick="bump('komi',-0.5,-30,30)">−</button>
+          <div class="tune-display"><input type="number" name="komi" id="f-komi" value="{{printf "%.1f" .Recommendation.Komi}}" step="0.5" inputmode="decimal"></div>
+          <button type="button" class="tune-btn" onclick="bump('komi',0.5,-30,30)">+</button>
+        </div>
+      </div>
+      <div class="komi-hint">Komi darf negativ sein (Rückkomi) — vor allem auf 9×9 sinnvoll.</div>
+    </div>
+
+    <div class="winner-row">
+      <button class="winner-btn black" type="submit" name="winner" value="black">
+        <span class="stone"></span>
+        Schwarz gewinnt
+      </button>
+      <button class="winner-btn white" type="submit" name="winner" value="white">
+        <span class="stone"></span>
+        Weiß gewinnt
+      </button>
+    </div>
+
+    <div class="wizard-actions">
+      <a class="btn ghost" href="{{.Wizard.BackPath}}">← Zurück</a>
+    </div>
+  </div>
+</form>
+
+<script>
+function bump(field, delta, min, max) {
+  var el = document.getElementById('f-' + field);
+  var v = parseFloat(el.value) || 0;
+  v = Math.max(min, Math.min(max, v + delta));
+  el.value = (field === 'komi') ? v.toFixed(1) : Math.round(v);
+}
+</script>
+{{end}}
+{{template "layout" .}}

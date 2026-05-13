@@ -82,10 +82,12 @@ func (s *Service) Recommend(ctx context.Context, p1ID, p2ID int64, board rating.
 
 // RecordGame writes a single game to the store and updates both
 // players' GoR atomically. Handicap (stones) is caller-supplied; komi
-// is auto-derived from the stones (EGF convention: 6.5 for even, 0.5
-// when handicap stones are placed). Rating bonus from handicap only
-// applies when Black is the weaker player.
-func (s *Service) RecordGame(ctx context.Context, groupID, blackID, whiteID int64, board rating.BoardSize, stones int, blackWon bool) (*store.Game, error) {
+// is optional — pass NaN to default it from stones (EGF convention: 6.5
+// on even games, 0.5 when handicap stones are placed). Komi can be
+// negative (Rückkomi) — useful on 9x9 where small gaps are sometimes
+// adjusted via komi instead of stones. The rating bonus is derived
+// from stones only, regardless of komi.
+func (s *Service) RecordGame(ctx context.Context, groupID, blackID, whiteID int64, board rating.BoardSize, stones int, komi float64, blackWon bool) (*store.Game, error) {
 	if blackID == whiteID {
 		return nil, errors.New("black and white must differ")
 	}
@@ -101,7 +103,10 @@ func (s *Service) RecordGame(ctx context.Context, groupID, blackID, whiteID int6
 		return nil, errors.New("players are not in this group")
 	}
 
-	h := rating.Handicap{Stones: stones, Komi: defaultKomi(stones)}
+	if isNaN(komi) {
+		komi = defaultKomi(stones)
+	}
+	h := rating.Handicap{Stones: stones, Komi: komi}
 	hcpBonus := h.HandicapBonus(board)
 	// Bonus only applies when Black is actually the weaker player.
 	if black.GoR > white.GoR {
@@ -129,6 +134,12 @@ func (s *Service) RecordGame(ctx context.Context, groupID, blackID, whiteID int6
 	}
 	return s.Store.RecordGame(ctx, g)
 }
+
+// DefaultKomi exposes the EGF convention for templates that need to
+// pre-fill the komi field on the game-record form.
+func (s *Service) DefaultKomi(stones int) float64 { return defaultKomi(stones) }
+
+func isNaN(f float64) bool { return f != f }
 
 // defaultKomi returns the EGF-conventional komi for a given number of
 // handicap stones: 6.5 on even games, 0.5 once stones are placed.

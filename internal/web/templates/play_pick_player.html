@@ -1,0 +1,99 @@
+{{define "content"}}
+<style>
+.player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.player-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 130px;
+  padding: 1.2rem 1.1rem 1rem;
+  border-radius: 18px;
+  text-decoration: none;
+  color: rgba(255,255,255,.98);
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  font-size: 1.4rem;
+  letter-spacing: -.01em;
+  line-height: 1.1;
+  box-shadow: 0 6px 16px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.18);
+  transition: transform .1s ease, box-shadow .1s ease;
+  overflow: hidden;
+  isolation: isolate;
+}
+.player-tile::before {
+  content: '';
+  position: absolute;
+  top: -20%;
+  right: -10%;
+  width: 60%;
+  height: 100%;
+  background: radial-gradient(circle, rgba(255,255,255,.25) 0%, transparent 70%);
+  z-index: -1;
+}
+.player-tile:hover, .player-tile:active { transform: translateY(-3px) scale(1.02); box-shadow: 0 14px 28px rgba(0,0,0,.18); }
+.player-tile .rank {
+  display: block;
+  font-family: 'Lexend Deca', sans-serif;
+  font-weight: 500;
+  font-size: .9rem;
+  letter-spacing: .04em;
+  opacity: .82;
+  margin-bottom: .2rem;
+}
+.player-tile.dark { color: var(--ink); }
+.player-tile.dark::before { background: radial-gradient(circle, rgba(20,33,61,.12) 0%, transparent 70%); }
+
+.no-players {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--muted);
+  background: #fff8e1;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  margin-top: 1.5rem;
+}
+.no-players strong { color: var(--ink); }
+</style>
+
+<div class="wizard-shell">
+  <div class="wizard-stepper">
+    <span class="{{if ge .Wizard.Step 1}}on{{end}}"></span>
+    <span class="{{if ge .Wizard.Step 2}}on{{end}}"></span>
+    <span class="{{if ge .Wizard.Step 3}}on{{end}}"></span>
+    {{if eq .Wizard.Flow "g"}}<span class="{{if ge .Wizard.Step 4}}on{{end}}"></span>{{end}}
+  </div>
+  <div class="wizard-headline">{{.Wizard.Headline}}</div>
+
+  {{$shown := 0}}
+  <div class="player-grid">
+    {{range .Players}}
+      {{if ne .ID $.Wizard.ExcludeID}}
+        {{$shown = add $shown 1}}
+        <a class="player-tile" style="background:{{tileColor .Name}}" href="{{$.Wizard.NextPath}}{{if eq $.Wizard.PickKey "p1"}}?{{else}}&{{end}}{{$.Wizard.PickKey}}={{.ID}}">
+          <span class="rank">{{rank .GoR}}</span>
+          {{.Name}}
+        </a>
+      {{end}}
+    {{end}}
+  </div>
+
+  {{if eq $shown 0}}
+  <div class="no-players">
+    Keine Spieler in der Gruppe.<br>
+    <strong>Sag deinem Trainer Bescheid</strong> — neue Spieler werden über den MCP-Server angelegt.
+  </div>
+  {{end}}
+
+  <div class="wizard-actions">
+    <a class="btn ghost" href="{{.Wizard.BackPath}}">← Zurück</a>
+    <span class="muted" style="font-size:.9rem">Tippe auf einen Namen</span>
+  </div>
+</div>
+{{end}}
+{{template "layout" .}}

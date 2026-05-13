@@ -1,0 +1,83 @@
+{{define "content"}}
+<style>
+.board-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.2rem;
+  margin-top: 1.8rem;
+}
+@media (max-width: 640px) { .board-grid { grid-template-columns: 1fr; } }
+.board-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem 1.6rem;
+  border-radius: 20px;
+  background: var(--paper-2);
+  border: 3px solid var(--line);
+  text-decoration: none;
+  color: var(--ink);
+  font-family: 'Fraunces', serif;
+  font-size: 2.2rem;
+  font-weight: 800;
+  transition: transform .1s ease, border-color .1s ease;
+  position: relative;
+}
+.board-tile small {
+  display: block;
+  font-family: 'Lexend Deca', sans-serif;
+  font-size: .9rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-top: .3rem;
+}
+.board-tile:hover, .board-tile:active { transform: translateY(-4px); border-color: var(--ink); }
+.board-glyph {
+  width: 86px; height: 86px; margin-bottom: .5rem;
+  background-color: #f7e4b2;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  padding: 8px;
+  background-image:
+    linear-gradient(var(--ink) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ink) 1px, transparent 1px);
+  background-position: 4px 4px;
+  background-clip: padding-box;
+}
+.board-tile[data-size="9"]  .board-glyph { background-size: 9px 9px;  background-image: linear-gradient(#14213d 1.5px, transparent 1.5px), linear-gradient(90deg, #14213d 1.5px, transparent 1.5px); }
+.board-tile[data-size="13"] .board-glyph { background-size: 6px 6px; }
+.board-tile[data-size="19"] .board-glyph { background-size: 4px 4px; background-image: linear-gradient(#14213d .8px, transparent .8px), linear-gradient(90deg, #14213d .8px, transparent .8px); }
+</style>
+
+<div class="wizard-shell">
+  <div class="wizard-stepper">
+    <span class="on"></span><span class="on"></span><span class="on"></span>
+    {{if eq .Wizard.Flow "g"}}<span></span>{{end}}
+  </div>
+  <div class="wizard-headline">{{.Wizard.Headline}}</div>
+
+  <div class="board-grid">
+    <a class="board-tile" data-size="9" href="{{.Wizard.NextPath}}&board=9">
+      <div class="board-glyph"></div>
+      9×9
+      <small>schnelle Partie</small>
+    </a>
+    <a class="board-tile" data-size="13" href="{{.Wizard.NextPath}}&board=13">
+      <div class="board-glyph"></div>
+      13×13
+      <small>mittel</small>
+    </a>
+    <a class="board-tile" data-size="19" href="{{.Wizard.NextPath}}&board=19">
+      <div class="board-glyph"></div>
+      19×19
+      <small>volles Brett</small>
+    </a>
+  </div>
+
+  <div class="wizard-actions">
+    <a class="btn ghost" href="{{.Wizard.BackPath}}">← Zurück</a>
+  </div>
+</div>
+{{end}}
+{{template "layout" .}}
