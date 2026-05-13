@@ -56,7 +56,7 @@ func (s *Server) loadTemplates() error {
 			return fmt.Sprintf("#%d", id)
 		},
 	}
-	pages := []string{"login", "index", "dashboard", "players", "sessions", "session", "admin"}
+	pages := []string{"index", "dashboard", "players", "sessions", "session", "admin"}
 	s.tmpls = map[string]*template.Template{}
 	for _, p := range pages {
 		t, err := template.New(p).Funcs(funcs).ParseFS(tmplFS,
@@ -209,7 +209,8 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	s.render(w, "login", pageContext{Title: "Anmelden"})
+	// Single OIDC provider — skip the intermediate page.
+	http.Redirect(w, r, "/auth/start", http.StatusFound)
 }
 
 func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {

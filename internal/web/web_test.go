@@ -58,16 +58,20 @@ func loggedInClient(t *testing.T, ts *httptest.Server, signer *auth.Signer, user
 	return c
 }
 
-func TestLoginPageRenders(t *testing.T) {
+func TestLoginRedirectsToAuthStart(t *testing.T) {
+	// With only one OIDC provider we skip the intermediate page —
+	// /login goes straight into the auth flow.
 	ts, _, _ := newTestWebServer(t)
-	resp, err := http.Get(ts.URL + "/login")
+	c := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := c.Get(ts.URL + "/login")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Anmelden") {
-		t.Errorf("login page should contain 'Anmelden'")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/auth/start" {
+		t.Errorf("got %d -> %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
 
