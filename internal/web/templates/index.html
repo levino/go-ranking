@@ -1,12 +1,61 @@
 {{define "content"}}
+<style>
+.group-list { list-style: none; padding: 0; margin: 0; }
+.group-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .8rem;
+  padding: .8rem 1rem;
+  margin-bottom: .5rem;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  flex-wrap: wrap;
+}
+.group-list .group-meta a {
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+}
+.group-list .group-meta a:hover { text-decoration: underline; }
+.group-list .group-meta .slug { color: var(--muted); font-size: .85rem; margin-left: .4rem; }
+
+.mcp-row {
+  display: flex;
+  gap: .5rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.mcp-row code {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-all;
+  padding: .55rem .7rem;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  user-select: all;
+  font-size: .85rem;
+}
+@media (max-width: 640px) {
+  .group-list li { padding: .7rem .8rem; }
+  .group-list .btn { width: 100%; }
+}
+</style>
 <h1>Go-Liga</h1>
 <p class="muted">Angemeldet als {{if .User.Name}}{{.User.Name}}{{else}}{{.User.Email}}{{end}}.</p>
 
 <h2>Deine Gruppen</h2>
 {{if .Groups}}
-<ul>
+<ul class="group-list">
 {{range .Groups}}
-  <li><a href="/g/{{.Slug}}">{{.Name}}</a> <span class="muted">({{.Slug}})</span> — <a class="btn" href="/g/{{.Slug}}/play">Spielen</a></li>
+  <li>
+    <div class="group-meta">
+      <a href="/g/{{.Slug}}">{{.Name}}</a><span class="slug">({{.Slug}})</span>
+    </div>
+    <a class="btn" href="/g/{{.Slug}}/play">Spielen</a>
+  </li>
 {{end}}
 </ul>
 {{else}}
@@ -17,8 +66,10 @@
 
 <h2>MCP-Server</h2>
 <p class="muted">Verwaltungstool für Claude.ai. URL:</p>
-<p><code id="mcp-url" style="display:inline-block;padding:.4rem .6rem;background:#fff;border:1px solid var(--bd);border-radius:4px;user-select:all">{{.MCPURL}}</code>
-<button class="btn secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('mcp-url').innerText)">kopieren</button></p>
-<p class="muted">Auth: OAuth/OIDC gegen id.levinkeller.de — Claude.ai entdeckt den Auth-Server selbst, beim ersten Verbinden öffnet sich ein Browser-Fenster.</p>
+<div class="mcp-row">
+  <code id="mcp-url">{{.MCPURL}}</code>
+  <button class="btn ghost" type="button" onclick="navigator.clipboard.writeText(document.getElementById('mcp-url').innerText)">kopieren</button>
+</div>
+<p class="muted" style="margin-top:.8rem">Auth: OAuth/OIDC gegen id.levinkeller.de — Claude.ai entdeckt den Auth-Server selbst, beim ersten Verbinden öffnet sich ein Browser-Fenster.</p>
 {{end}}
 {{template "layout" .}}

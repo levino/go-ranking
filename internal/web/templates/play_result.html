@@ -36,6 +36,14 @@
   font-size: 2rem;
   letter-spacing: -.02em;
 }
+@media (max-width: 640px) {
+  .result-vs { gap: .6rem; margin: 1rem 0 1.5rem; }
+  .result-side { flex: 1 1 calc(50% - .3rem); min-width: 0; padding: .9rem .6rem; border-radius: 14px; gap: .4rem; }
+  .result-side .stone { width: 52px; height: 52px; font-size: 1.2rem; }
+  .result-side .name { font-size: 1.05rem; }
+  .result-side .role { font-size: .7rem; }
+  .result-side .rank { font-size: .8rem; }
+}
 .result-side.black .stone {
   background: radial-gradient(circle at 32% 28%, #4b5563 0%, #111827 60%);
   color: white;
@@ -82,6 +90,13 @@
   line-height: 1;
   letter-spacing: -.04em;
   color: var(--accent);
+}
+@media (max-width: 640px) {
+  .handicap-card { padding: 1.1rem 1rem; margin-bottom: 1.4rem; border-width: 2px; border-radius: 16px; }
+  .handicap-card .num { font-size: 3.4rem; }
+  .handicap-card .num small { font-size: 1rem; }
+  .cta-row { flex-direction: column; gap: .6rem; margin-top: 1.5rem; }
+  .cta-row .btn { width: 100%; }
 }
 .handicap-card .num small {
   font-size: 1.2rem;
@@ -152,17 +167,17 @@
     {{if eq .Recommendation.Stones 0}}
       <div class="label">Ebenes Spiel</div>
       <div class="even-pill">Keine Vorgabe</div>
-      <div class="komi">Komi {{printf "%.1f" .Recommendation.Komi}}</div>
+      <div class="komi">{{komiText .Recommendation.Komi}}{{if lt .Recommendation.Komi 0.0}} — Schwarz bekommt am Ende Punkte abgezogen{{end}}</div>
     {{else}}
       <div class="label">Vorgabe für Schwarz</div>
       <div class="num">{{.Recommendation.Stones}}<small>Steine</small></div>
-      <div class="komi">Komi {{printf "%.1f" .Recommendation.Komi}}</div>
+      <div class="komi">{{komiText .Recommendation.Komi}}</div>
     {{end}}
   </div>
 
   <div class="cta-row">
-    <a class="btn huge success" href="/g/{{.Group.Slug}}/play">Alles klar</a>
-    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play/g/p1">Ergebnis eintragen</a>
+    <a class="btn huge success" href="/g/{{.Group.Slug}}/play/g/finish?p1={{.Recommendation.BlackPlayer.ID}}&p2={{.Recommendation.WhitePlayer.ID}}&board={{.Recommendation.Board}}">Ergebnis eintragen</a>
+    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play">Fertig</a>
   </div>
 </div>
 {{end}}

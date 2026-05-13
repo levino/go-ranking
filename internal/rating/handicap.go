@@ -68,19 +68,26 @@ func Recommended(stronger, weaker float64, board BoardSize) Handicap {
 	}
 }
 
+// Vorgabe-Tabelle: 1 Stein gibt es bewusst nicht. Ein einzelner
+// Vorgabestein ist im Go sinnlos — er ist zu schwach für nennenswerten
+// Ausgleich, aber zu viel, um als "fast ebene" Partie durchzugehen.
+// Stattdessen wird der schmale Bereich zwischen "Komi 6,5" und
+// "2 Steine" durch Komi-Anpassung überbrückt: Rückkomi (negatives
+// Komi für Schwarz) bzw. reduziertes Komi für Weiß.
+
 func rec9(d float64) Handicap {
 	switch {
-	case d < 100:
+	case d < 70:
 		return Handicap{0, 6.5}
-	case d < 200:
-		return Handicap{0, 0.5}
-	case d < 300:
-		return Handicap{1, 0.5}
-	case d < 400:
+	case d < 140:
+		return Handicap{0, 0.5} // leichter Ausgleich über Komi
+	case d < 210:
+		return Handicap{0, -5.5} // Rückkomi statt 1 Stein
+	case d < 280:
 		return Handicap{2, 0.5}
-	case d < 500:
+	case d < 350:
 		return Handicap{3, 0.5}
-	case d < 600:
+	case d < 420:
 		return Handicap{4, 0.5}
 	}
 	return Handicap{4, -5.5}
@@ -91,8 +98,10 @@ func rec13(d float64) Handicap {
 	case d < 100:
 		return Handicap{0, 6.5}
 	case d < 200:
-		return Handicap{0, 0.5}
-	case d < 400:
+		return Handicap{0, 0.5} // leichter Ausgleich über Komi
+	case d < 300:
+		return Handicap{0, -5.5} // Rückkomi statt 1 Stein
+	case d < 450:
 		return Handicap{2, 0.5}
 	case d < 600:
 		return Handicap{3, 0.5}
@@ -109,20 +118,22 @@ func rec19(d float64) Handicap {
 	case d < 100:
 		return Handicap{0, 6.5}
 	case d < 200:
-		return Handicap{0, 0.5}
+		return Handicap{0, 0.5} // leichter Ausgleich über Komi
 	case d < 300:
-		return Handicap{2, 0.5}
+		return Handicap{0, -5.5} // Rückkomi statt 1 Stein
 	case d < 400:
-		return Handicap{3, 0.5}
+		return Handicap{2, 0.5}
 	case d < 500:
-		return Handicap{4, 0.5}
+		return Handicap{3, 0.5}
 	case d < 600:
-		return Handicap{5, 0.5}
+		return Handicap{4, 0.5}
 	case d < 700:
-		return Handicap{6, 0.5}
+		return Handicap{5, 0.5}
 	case d < 800:
-		return Handicap{7, 0.5}
+		return Handicap{6, 0.5}
 	case d < 900:
+		return Handicap{7, 0.5}
+	case d < 1000:
 		return Handicap{8, 0.5}
 	}
 	return Handicap{9, 0.5}

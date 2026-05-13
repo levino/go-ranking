@@ -36,6 +36,9 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
+  /* Respect iOS safe areas on notched devices. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 h1, h2, h3 {
   font-family: 'Fraunces', Georgia, serif;
@@ -52,16 +55,34 @@ header.site {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
 }
 header.site a { color: var(--ink); text-decoration: none; }
 header.site .brand { font-family: 'Fraunces', serif; font-weight: 800; font-size: 1.15rem; }
-header.site .links a { margin-right: 1rem; color: var(--muted); }
+header.site .links {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+}
+header.site .links a { color: var(--muted); }
 header.site .links a:hover { color: var(--ink); }
 main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.2rem 5rem; }
 table { border-collapse: collapse; width: 100%; background: var(--paper-2); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
 th, td { padding: .55rem .8rem; border-bottom: 1px solid var(--line); text-align: left; }
 th { background: #f0ece0; font-weight: 600; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
 tr:last-child td { border-bottom: none; }
+
+/* Tables overflow horizontally on narrow viewports — wrap them in
+   .table-scroll so kids can swipe instead of breaking the layout. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius);
+  margin: 0 -.4rem;
+  padding: 0 .4rem;
+}
 
 .btn {
   display: inline-flex;
@@ -79,6 +100,8 @@ tr:last-child td { border-bottom: none; }
   text-decoration: none;
   cursor: pointer;
   transition: transform .08s ease;
+  /* Ensure tap targets are big enough on touch. */
+  min-height: 44px;
 }
 .btn:hover { transform: translateY(-1px); }
 .btn:active { transform: translateY(0); }
@@ -88,7 +111,7 @@ tr:last-child td { border-bottom: none; }
 }
 .btn.danger { background: var(--accent); border-color: var(--accent); }
 .btn.success { background: var(--ok); border-color: var(--ok); }
-.btn.huge { padding: 1.1rem 1.8rem; font-size: 1.25rem; border-radius: 16px; }
+.btn.huge { padding: 1.1rem 1.8rem; font-size: 1.25rem; border-radius: 16px; min-height: 56px; }
 
 input, select {
   font-family: inherit;
@@ -170,8 +193,37 @@ code {
   align-items: center;
   gap: 1rem;
   margin-top: 2rem;
+  flex-wrap: wrap;
 }
 .wizard-actions .left { display: flex; gap: 1rem; }
+
+/* Mobile (≤640px) — tighter padding, smaller headings, full-width
+   buttons in stacked rows. The wizard takes nearly the whole screen
+   so tap targets stay big. */
+@media (max-width: 640px) {
+  body { font-size: 16px; }
+  h1 { font-size: 1.7rem; }
+  h2 { font-size: 1.25rem; }
+  header.site { padding: .6rem .9rem; }
+  header.site .brand { font-size: 1rem; }
+  header.site .links { font-size: .9rem; gap: .4rem; }
+  header.site .links .btn { padding: .45rem .8rem; font-size: .9rem; min-height: 38px; }
+  main { padding: 1rem .8rem 4rem; }
+  table { font-size: .92rem; }
+  th, td { padding: .45rem .55rem; }
+
+  .wizard-shell {
+    padding: 1.2rem 1rem 1.6rem;
+    border-radius: 16px;
+    margin-left: -.2rem;
+    margin-right: -.2rem;
+  }
+  .wizard-headline { font-size: 1.4rem; margin-bottom: 1.1rem; }
+  .wizard-actions { flex-direction: column-reverse; align-items: stretch; gap: .6rem; }
+  .wizard-actions .btn { width: 100%; }
+  .wizard-actions span { text-align: center; }
+  .btn.huge { padding: .95rem 1.2rem; font-size: 1.1rem; }
+}
 </style>
 </head>
 <body>

@@ -6,6 +6,9 @@
   gap: 1.5rem;
   margin: 2rem 0;
 }
+@media (max-width: 640px) {
+  .start-grid { gap: .9rem; margin: 1.2rem 0; }
+}
 .entry-card {
   position: relative;
   display: block;
@@ -18,6 +21,13 @@
   transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
   overflow: hidden;
   min-height: 200px;
+}
+@media (max-width: 640px) {
+  .entry-card { padding: 1.4rem 1.2rem; min-height: 140px; border-radius: 16px; }
+  .entry-card .ico { font-size: 2.6rem; margin-bottom: .3rem; }
+  .entry-card h2 { font-size: 1.3rem; }
+  .entry-card p { font-size: .9rem; }
+  .entry-card .step-hint { top: .7rem; right: .9rem; font-size: .75rem; }
 }
 .entry-card:hover, .entry-card:active { transform: translateY(-3px); border-color: var(--ink); box-shadow: var(--shadow-2); }
 .entry-card .ico {
@@ -69,19 +79,21 @@
 {{if .RecentGames}}
 <div class="recent">
   <h3>Heute schon gespielt</h3>
-  <table>
-    <tr><th>Zeit</th><th>Schwarz</th><th>Weiß</th><th>Brett</th><th>Vorgabe</th><th>Sieger</th></tr>
-    {{range .RecentGames}}
-    <tr>
-      <td>{{.PlayedAt.Format "15:04"}}</td>
-      <td><strong>{{playerName $.PlayerNames .BlackPlayerID}}</strong></td>
-      <td>{{playerName $.PlayerNames .WhitePlayerID}}</td>
-      <td>{{.BoardSize}}</td>
-      <td>{{.Handicap}}{{if ne .Komi 6.5}}{{if ne .Komi 0.5}} / Komi {{printf "%.1f" .Komi}}{{end}}{{end}}</td>
-      <td>{{if eq .Winner "black"}}⚫ Schwarz{{else}}⚪ Weiß{{end}}</td>
-    </tr>
-    {{end}}
-  </table>
+  <div class="table-scroll">
+    <table>
+      <tr><th>Zeit</th><th>Schwarz</th><th>Weiß</th><th>Brett</th><th>Vorgabe</th><th>Sieger</th></tr>
+      {{range .RecentGames}}
+      <tr>
+        <td>{{.PlayedAt.Format "15:04"}}</td>
+        <td><strong>{{playerName $.PlayerNames .BlackPlayerID}}</strong></td>
+        <td>{{playerName $.PlayerNames .WhitePlayerID}}</td>
+        <td>{{.BoardSize}}</td>
+        <td>{{.Handicap}}{{if ne .Komi 6.5}}{{if ne .Komi 0.5}} / Komi {{printf "%.1f" .Komi}}{{end}}{{end}}</td>
+        <td>{{if eq .Winner "black"}}⚫ Schwarz{{else}}⚪ Weiß{{end}}</td>
+      </tr>
+      {{end}}
+    </table>
+  </div>
 </div>
 {{end}}
 {{end}}

@@ -6,6 +6,13 @@
   gap: 1rem;
   margin-top: 1.5rem;
 }
+@media (max-width: 640px) {
+  .player-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: .7rem;
+    margin-top: 1rem;
+  }
+}
 .player-tile {
   position: relative;
   display: flex;
@@ -25,6 +32,16 @@
   transition: transform .1s ease, box-shadow .1s ease;
   overflow: hidden;
   isolation: isolate;
+  word-break: break-word;
+}
+@media (max-width: 640px) {
+  .player-tile {
+    min-height: 100px;
+    padding: .9rem .8rem .8rem;
+    font-size: 1.15rem;
+    border-radius: 14px;
+  }
+  .player-tile .rank { font-size: .8rem; }
 }
 .player-tile::before {
   content: '';

@@ -3,6 +3,7 @@
 <h1>Spieler</h1>
 
 {{if .Players}}
+<div class="table-scroll">
 <table>
 <tr><th>Name</th><th>GoR</th><th>Rang</th><th>Status</th></tr>
 {{range .Players}}
@@ -14,6 +15,7 @@
 </tr>
 {{end}}
 </table>
+</div>
 {{else}}
 <p class="muted">Noch keine Spieler. Über die <a href="/g/{{.Group.Slug}}/play">Spielen-Seite</a> oder via MCP anlegen.</p>
 {{end}}

@@ -34,6 +34,15 @@
 .confirm-summary .winner.black .stone { background: radial-gradient(circle at 30% 28%, #4b5563 0%, #000 70%); }
 .confirm-summary .winner.white .stone { background: radial-gradient(circle at 30% 28%, #ffffff 0%, #e8dfb8 80%); border: 1.5px solid var(--ink); }
 .confirm-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .confirm-shell { padding: 1.4rem 1rem; border-radius: 16px; }
+  .confirm-shell h1 { font-size: 1.7rem; }
+  .confirm-shell .sub { margin-bottom: 1.2rem; }
+  .confirm-summary { padding: 1rem 1.1rem; font-size: 1rem; margin-bottom: 1.4rem; }
+  .confirm-summary dd { font-size: 1.1rem; }
+  .confirm-cta { flex-direction: column; gap: .6rem; }
+  .confirm-cta .btn { width: 100%; }
+}
 </style>
 
 <div class="confirm-shell">
