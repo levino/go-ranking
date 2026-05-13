@@ -185,9 +185,9 @@ func (s *Server) callTool(ctx context.Context, p ToolCallParams) (*ToolCallResul
 }
 
 func (s *Server) toolListMyGroups(ctx context.Context) (*ToolCallResult, error) {
-	user, err := s.callerUser(ctx)
-	if err != nil {
-		return errorResult(err.Error()), nil
+	user, ok := userFromCtx(ctx)
+	if !ok {
+		return errorResult("no caller in context"), nil
 	}
 	groups, err := s.Service.Store.ListAdminGroups(ctx, user.ID)
 	if err != nil {
@@ -204,9 +204,9 @@ func (s *Server) toolListMyGroups(ctx context.Context) (*ToolCallResult, error) 
 }
 
 func (s *Server) toolCreateGroup(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
-	user, err := s.callerUser(ctx)
-	if err != nil {
-		return errorResult(err.Error()), nil
+	user, ok := userFromCtx(ctx)
+	if !ok {
+		return errorResult("no caller in context"), nil
 	}
 	slug, _ := args["slug"].(string)
 	name, _ := args["name"].(string)

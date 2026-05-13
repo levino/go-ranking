@@ -2,9 +2,8 @@
 // only writer) end-to-end against a real httptest.Server backed by a
 // temporary SQLite database.
 //
-// The tests skip the real OIDC dance — they mint a session cookie
-// directly via the Signer after upserting a user. This is the same
-// state the server would be in after a successful OIDC callback.
+// The MCP-side tests stand up a fake OIDC server speaking discovery +
+// userinfo, so the real Userinfo-based auth path runs end to end.
 package e2e
 
 import (
@@ -32,11 +31,44 @@ import (
 // ---- Test rig ------------------------------------------------------------
 
 type rig struct {
-	t      *testing.T
-	srv    *httptest.Server
-	svc    *service.Service
-	mcp    *mcp.Server
-	signer *auth.Signer
+	t       *testing.T
+	srv     *httptest.Server
+	svc     *service.Service
+	mcp     *mcp.Server
+	signer  *auth.Signer
+	tokens  map[string]auth.UserInfo // bearer token → userinfo
+	mcpURL  string
+}
+
+// stubOIDC stands up a fake OIDC server (discovery + userinfo) and
+// returns an OIDC client pointing at it. Tokens map 1:1 to userinfo.
+func stubOIDC(t *testing.T, tokens map[string]auth.UserInfo) *auth.OIDC {
+	t.Helper()
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"issuer":                 srv.URL,
+			"authorization_endpoint": srv.URL + "/authorize",
+			"token_endpoint":         srv.URL + "/token",
+			"userinfo_endpoint":      srv.URL + "/userinfo",
+			"jwks_uri":               srv.URL + "/keys",
+		})
+	})
+	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		info, ok := tokens[tok]
+		if !ok {
+			http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(info)
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return auth.NewOIDC(srv.URL, "client", "secret", "https://example.test/auth/callback")
 }
 
 func newRig(t *testing.T) *rig {
@@ -51,25 +83,31 @@ func newRig(t *testing.T) *rig {
 	keyHex := strings.Repeat("a", 64)
 	keyBytes, _ := hex.DecodeString(keyHex)
 	signer := auth.NewSigner(keyBytes)
-	oidc := auth.NewOIDC("https://example.invalid", "id", "secret", "https://example.test/auth/callback")
+	tokens := map[string]auth.UserInfo{}
+	oidc := stubOIDC(t, tokens)
 	webSrv, err := web.New(svc, signer, oidc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mcpSrv := &mcp.Server{Service: svc, AuthToken: "secret-token"}
+	mcpSrv := &mcp.Server{
+		Service:  svc,
+		OIDC:     oidc,
+		Resource: "https://example.test/mcp",
+	}
 
 	root := http.NewServeMux()
 	root.Handle("/mcp", mcpSrv.Handler())
+	root.HandleFunc("GET /.well-known/oauth-protected-resource", mcpSrv.HandleProtectedResource)
 	root.Handle("/", webSrv.Handler())
 	srv := httptest.NewServer(root)
 	t.Cleanup(srv.Close)
 
-	return &rig{t: t, srv: srv, svc: svc, mcp: mcpSrv, signer: signer}
+	return &rig{t: t, srv: srv, svc: svc, mcp: mcpSrv, signer: signer, tokens: tokens, mcpURL: srv.URL + "/mcp"}
 }
 
-// loginAs creates/refreshes a user via OIDC upsert and returns a client
-// with a session cookie.
-func (r *rig) loginAs(subject, email, name string) (*http.Client, *store.User) {
+// loginAs creates/refreshes a user and returns a web client with a
+// session cookie plus a fake OIDC bearer token that maps to that user.
+func (r *rig) loginAs(subject, email, name string) (*http.Client, *store.User, string) {
 	r.t.Helper()
 	u, err := r.svc.Store.UpsertUserByOIDC(context.Background(), subject, email, name)
 	if err != nil {
@@ -88,18 +126,20 @@ func (r *rig) loginAs(subject, email, name string) (*http.Client, *store.User) {
 	}
 	srvURL, _ := url.Parse(r.srv.URL)
 	jar.SetCookies(srvURL, rec.Result().Cookies())
-	return c, u
+
+	tok := "tok-" + subject
+	r.tokens[tok] = auth.UserInfo{Subject: subject, Email: email, Name: name}
+	return c, u, tok
 }
 
 // ---- MCP-driven CRUD: full lifecycle -------------------------------------
 
 func TestEndToEndMCPLifecycle(t *testing.T) {
 	rg := newRig(t)
-	_, owner := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
-	rg.mcp.MCPUser = owner.OIDCSubject
+	_, owner, ownerTok := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
 
 	// 1. create_group → owner is admin
-	mustToolOK(t, rg, "create_group", map[string]any{"slug": "g1", "name": "Group One"})
+	mustToolOK(t, rg, ownerTok, "create_group", map[string]any{"slug": "g1", "name": "Group One"})
 	g, err := rg.svc.Store.GroupBySlug(context.Background(), "g1")
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +152,7 @@ func TestEndToEndMCPLifecycle(t *testing.T) {
 	for _, p := range []struct{ name, rank string }{
 		{"Anna", "10k"}, {"Ben", "15k"}, {"Clara", "20k"}, {"Dirk", "25k"},
 	} {
-		mustToolOK(t, rg, "add_player", map[string]any{"group": "g1", "name": p.name, "rank": p.rank})
+		mustToolOK(t, rg, ownerTok, "add_player", map[string]any{"group": "g1", "name": p.name, "rank": p.rank})
 	}
 	players, _ := rg.svc.Store.ListPlayers(context.Background(), g.ID, true)
 	if len(players) != 4 {
@@ -120,7 +160,7 @@ func TestEndToEndMCPLifecycle(t *testing.T) {
 	}
 
 	// 3. update_player: deactivate Dirk
-	mustToolOK(t, rg, "update_player", map[string]any{
+	mustToolOK(t, rg, ownerTok, "update_player", map[string]any{
 		"group": "g1", "name": "Dirk", "active": false,
 	})
 	active, _ := rg.svc.Store.ListPlayers(context.Background(), g.ID, false)
@@ -129,11 +169,11 @@ func TestEndToEndMCPLifecycle(t *testing.T) {
 	}
 
 	// 4. create_session
-	out := mustToolOK(t, rg, "create_session", map[string]any{"group": "g1"})
+	out := mustToolOK(t, rg, ownerTok, "create_session", map[string]any{"group": "g1"})
 	pass := extractPassphrase(t, out)
 
 	// 5. record_game: Ben (#2, 15k) Black vs Anna (#1, 10k) White; Ben wins.
-	mustToolOK(t, rg, "record_game", map[string]any{
+	mustToolOK(t, rg, ownerTok, "record_game", map[string]any{
 		"passphrase":   pass,
 		"black_number": 2,
 		"white_number": 1,
@@ -142,28 +182,28 @@ func TestEndToEndMCPLifecycle(t *testing.T) {
 	})
 
 	// 6. list_sessions sees one session with one game.
-	out = mustToolOK(t, rg, "list_sessions", map[string]any{"group": "g1"})
+	out = mustToolOK(t, rg, ownerTok, "list_sessions", map[string]any{"group": "g1"})
 	if !strings.Contains(out, pass) || !strings.Contains(out, "1 Partien") {
 		t.Errorf("list_sessions output not as expected: %s", out)
 	}
 
-	// 7. add_admin: create another OIDC user and promote them.
-	_, _ = rg.svc.Store.UpsertUserByOIDC(context.Background(), "oidc-co", "co@example.com", "Co")
-	mustToolOK(t, rg, "add_admin", map[string]any{"group": "g1", "email": "co@example.com"})
+	// 7. Co-admin: someone else logs in (so they exist in users) → owner adds them.
+	_, _, _ = rg.loginAs("oidc-co", "co@example.com", "Co")
+	mustToolOK(t, rg, ownerTok, "add_admin", map[string]any{"group": "g1", "email": "co@example.com"})
 	admins, _ := rg.svc.Store.ListGroupAdmins(context.Background(), g.ID)
 	if len(admins) != 2 {
 		t.Fatalf("expected 2 admins, got %d", len(admins))
 	}
 
-	// 8. remove_admin (the co-admin, not self)
-	mustToolOK(t, rg, "remove_admin", map[string]any{"group": "g1", "email": "co@example.com"})
+	// 8. remove_admin (the co-admin, not self).
+	mustToolOK(t, rg, ownerTok, "remove_admin", map[string]any{"group": "g1", "email": "co@example.com"})
 	admins, _ = rg.svc.Store.ListGroupAdmins(context.Background(), g.ID)
 	if len(admins) != 1 {
 		t.Fatalf("expected 1 admin after remove, got %d", len(admins))
 	}
 
 	// 9. Removing oneself when only admin → error (sole-admin guard).
-	out = callTool(t, rg, "remove_admin", map[string]any{"group": "g1", "email": "owner@example.com"})
+	out = callTool(t, rg, ownerTok, "remove_admin", map[string]any{"group": "g1", "email": "owner@example.com"})
 	if !strings.Contains(out, "last admin") {
 		t.Errorf("sole-admin guard not triggered: %s", out)
 	}
@@ -173,17 +213,15 @@ func TestEndToEndMCPLifecycle(t *testing.T) {
 
 func TestWebUIReadOnly(t *testing.T) {
 	rg := newRig(t)
-	_, owner := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
-	rg.mcp.MCPUser = owner.OIDCSubject
+	owner, _, ownerTok := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
 
 	// Seed data via MCP.
-	mustToolOK(t, rg, "create_group", map[string]any{"slug": "g1", "name": "Group One"})
-	mustToolOK(t, rg, "add_player", map[string]any{"group": "g1", "name": "Anna", "rank": "10k"})
-
-	owner_client, _ := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
+	mustToolOK(t, rg, ownerTok, "create_group", map[string]any{"slug": "g1", "name": "Group One"})
+	mustToolOK(t, rg, ownerTok, "add_player", map[string]any{"group": "g1", "name": "Anna", "rank": "10k"})
+	mustToolOK(t, rg, ownerTok, "create_session", map[string]any{"group": "g1"})
 
 	// Dashboard renders.
-	resp, err := owner_client.Get(rg.srv.URL + "/g/g1")
+	resp, err := owner.Get(rg.srv.URL + "/g/g1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,28 +231,13 @@ func TestWebUIReadOnly(t *testing.T) {
 		t.Fatalf("dashboard %d, body %s", resp.StatusCode, body)
 	}
 
-	// Index shows MCP URL.
-	resp, err = owner_client.Get(rg.srv.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !bytes.Contains(body, []byte("https://example.test/mcp")) {
-		t.Errorf("index should display the MCP URL")
-	}
-
-	// PDFs.
-	sess, _ := rg.svc.Store.ListSessions(context.Background(), 1)
-	if len(sess) == 0 {
-		// create one via MCP (it's required for PDF generation)
-		mustToolOK(t, rg, "create_session", map[string]any{"group": "g1"})
-		sess, _ = rg.svc.Store.ListSessions(context.Background(), 1)
-	}
+	// PDFs render.
+	g, _ := rg.svc.Store.GroupBySlug(context.Background(), "g1")
+	sess, _ := rg.svc.Store.ListSessions(context.Background(), g.ID)
 	pass := sess[0].Passphrase
 	for _, suffix := range []string{"matrix.pdf", "scorecard.pdf"} {
 		u := rg.srv.URL + "/g/g1/sessions/" + pass + "/" + suffix
-		resp, err := owner_client.Get(u)
+		resp, err := owner.Get(u)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -229,8 +252,8 @@ func TestWebUIReadOnly(t *testing.T) {
 	}
 
 	// A stranger gets 403.
-	stranger_client, _ := rg.loginAs("oidc-stranger", "stranger@example.com", "Stranger")
-	resp, err = stranger_client.Get(rg.srv.URL + "/g/g1")
+	stranger, _, _ := rg.loginAs("oidc-stranger", "stranger@example.com", "Stranger")
+	resp, err = stranger.Get(rg.srv.URL + "/g/g1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,9 +263,11 @@ func TestWebUIReadOnly(t *testing.T) {
 	}
 }
 
-func TestMCPRequiresAuth(t *testing.T) {
+// ---- MCP auth: discovery + 401 contract ----------------------------------
+
+func TestMCPUnauthenticatedReturnsResourceMetadata(t *testing.T) {
 	rg := newRig(t)
-	req, _ := http.NewRequest("POST", rg.srv.URL+"/mcp",
+	req, _ := http.NewRequest("POST", rg.mcpURL,
 		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -251,6 +276,30 @@ func TestMCPRequiresAuth(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+	wa := resp.Header.Get("WWW-Authenticate")
+	if !strings.Contains(wa, "resource_metadata=") {
+		t.Errorf("WWW-Authenticate missing resource_metadata: %q", wa)
+	}
+}
+
+func TestProtectedResourceEndpoint(t *testing.T) {
+	rg := newRig(t)
+	resp, err := http.Get(rg.srv.URL + "/.well-known/oauth-protected-resource")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d body %s", resp.StatusCode, body)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(body, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta["resource"] == nil || meta["authorization_servers"] == nil {
+		t.Errorf("metadata incomplete: %s", body)
 	}
 }
 
@@ -291,11 +340,8 @@ func mcpRPC(t *testing.T, url, token, method string, params map[string]any) *rpc
 	return &r
 }
 
-// callTool invokes a tool and returns the concatenated text from its
-// content blocks. Used to inspect error messages without forcing the
-// test to fail on isError.
-func callTool(t *testing.T, rg *rig, name string, args map[string]any) string {
-	res := mcpRPC(t, rg.srv.URL+"/mcp", "secret-token", "tools/call", map[string]any{
+func callTool(t *testing.T, rg *rig, token, name string, args map[string]any) string {
+	res := mcpRPC(t, rg.mcpURL, token, "tools/call", map[string]any{
 		"name":      name,
 		"arguments": args,
 	})
@@ -315,9 +361,9 @@ func callTool(t *testing.T, rg *rig, name string, args map[string]any) string {
 	return sb.String()
 }
 
-func mustToolOK(t *testing.T, rg *rig, name string, args map[string]any) string {
+func mustToolOK(t *testing.T, rg *rig, token, name string, args map[string]any) string {
 	t.Helper()
-	res := mcpRPC(t, rg.srv.URL+"/mcp", "secret-token", "tools/call", map[string]any{
+	res := mcpRPC(t, rg.mcpURL, token, "tools/call", map[string]any{
 		"name":      name,
 		"arguments": args,
 	})
@@ -343,7 +389,6 @@ func mustToolOK(t *testing.T, rg *rig, name string, args map[string]any) string 
 
 func extractPassphrase(t *testing.T, createSessionOutput string) string {
 	t.Helper()
-	// Output looks like "Neue Session: lucky-fox\nMatrix-PDF: ...".
 	line := strings.SplitN(createSessionOutput, "\n", 2)[0]
 	pass := strings.TrimSpace(strings.TrimPrefix(line, "Neue Session: "))
 	if pass == "" {

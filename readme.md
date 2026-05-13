@@ -18,14 +18,15 @@ The whole stack is one Go binary plus a SQLite file:
 
 ```bash
 export GO_LIGA_SIGNING_KEY=$(head -c 32 /dev/urandom | xxd -p -c 64)
-export GO_LIGA_BOOTSTRAP_USER=admin
-export GO_LIGA_BOOTSTRAP_PASSWORD=secret
-export GO_LIGA_MCP_TOKEN=$(head -c 16 /dev/urandom | xxd -p)
+export GO_LIGA_OIDC_ISSUER=https://id.levinkeller.de
+export GO_LIGA_OIDC_CLIENT_ID=...           # from Zitadel
+export GO_LIGA_OIDC_CLIENT_SECRET=...        # from Zitadel
+export GO_LIGA_OIDC_REDIRECT_URL=http://localhost:8080/auth/callback
 
 go run ./cmd/server
 ```
 
-Then open <http://localhost:8080/login> and sign in as `admin / secret`.
+Then open <http://localhost:8080/> and authenticate via id.levinkeller.de.
 
 ## Tests
 
@@ -71,6 +72,6 @@ OIDC for authentication (no static kubeconfig).
 | `GO_LIGA_SIGNING_KEY`          | HMAC key for session cookies (32 bytes hex) |
 | `GO_LIGA_DB`                   | SQLite path (default `go-liga.db`)          |
 | `GO_LIGA_LISTEN`               | HTTP listen address (default `:8080`)       |
-| `GO_LIGA_MCP_TOKEN`            | Bearer token gating `/mcp` (recommended)    |
-| `GO_LIGA_MCP_GROUP`            | Default group slug for MCP tools            |
-| `GO_LIGA_BOOTSTRAP_USER` / `_PASSWORD` | Create an initial admin on first run |
+| `GO_LIGA_OIDC_ISSUER`          | OIDC issuer (e.g. `https://id.levinkeller.de`) |
+| `GO_LIGA_OIDC_CLIENT_ID` / `_SECRET` | OIDC client credentials (web app) |
+| `GO_LIGA_OIDC_REDIRECT_URL`    | Web app OAuth callback URL                  |
