@@ -77,7 +77,9 @@ func (s *Server) loadTemplates() error {
 		// Deterministic per-name colour for the player tiles. Eight
 		// saturated, kid-friendly hues; the same name always renders the
 		// same colour, so kids learn to recognise themselves visually.
-		"tileColor": func(name string) string {
+		// Returns template.CSS so html/template doesn't replace it with
+		// the ZgotmplZ safety placeholder in a style="" attribute.
+		"tileColor": func(name string) template.CSS {
 			var h uint32
 			for _, r := range name {
 				h = h*31 + uint32(r)
@@ -92,7 +94,7 @@ func (s *Server) loadTemplates() error {
 				"#a855f7", // violet
 				"#fb7185", // rose
 			}
-			return palette[int(h%uint32(len(palette)))]
+			return template.CSS(palette[int(h%uint32(len(palette)))])
 		},
 		// Komi rendered with a non-confusing sign: positive shown as-is,
 		// negative shown as e.g. "Rückkomi 7,5" so the kids see what
@@ -195,13 +197,15 @@ type pageContext struct {
 	Flash          string
 	Selected       playSelection
 	SelectedKomi   float64
-	Wizard         wizardState
+	Wizard         WizardState
 }
 
-// wizardState carries the per-step navigation context for the play
+// WizardState carries the per-step navigation context for the play
 // wizard templates: where to go next/back, what to ask, and which
-// query-string key to write the user's pick into.
-type wizardState struct {
+// query-string key to write the user's pick into. Exported because
+// html/template's reflection-based field access is more reliable on
+// exported types than unexported ones.
+type WizardState struct {
 	Flow      string // "r" (recommend) or "g" (record)
 	Step      int
 	Headline  string
@@ -450,7 +454,7 @@ func (s *Server) handlePlayStart(w http.ResponseWriter, r *http.Request, g *stor
 
 func (s *Server) handleRecP1(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	ctx := s.basePlayContext(r, g, "Wer spielt?")
-	ctx.Wizard = wizardState{Flow: "r", Step: 1, NextPath: "/g/" + g.Slug + "/play/r/p2", BackPath: "/g/" + g.Slug + "/play",
+	ctx.Wizard = WizardState{Flow: "r", Step: 1, NextPath: "/g/" + g.Slug + "/play/r/p2", BackPath: "/g/" + g.Slug + "/play",
 		Headline: "Wer ist der erste Spieler?", PickKey: "p1"}
 	s.render(w, "play_pick_player", ctx)
 }
@@ -462,12 +466,12 @@ func (s *Server) handleRecP2(w http.ResponseWriter, r *http.Request, g *store.Gr
 		return
 	}
 	ctx := s.basePlayContext(r, g, "Und der zweite?")
-	ctx.Wizard = wizardState{
+	ctx.Players = filterPlayers(ctx.Players, p1)
+	ctx.Wizard = WizardState{
 		Flow: "r", Step: 2,
 		NextPath: "/g/" + g.Slug + "/play/r/board?p1=" + fmt.Sprintf("%d", p1),
 		BackPath: "/g/" + g.Slug + "/play/r/p1",
 		Headline: "Und wer ist Spieler 2?", PickKey: "p2",
-		ExcludeID: p1,
 	}
 	s.render(w, "play_pick_player", ctx)
 }
@@ -480,7 +484,7 @@ func (s *Server) handleRecBoard(w http.ResponseWriter, r *http.Request, g *store
 		return
 	}
 	ctx := s.basePlayContext(r, g, "Wie groß ist das Brett?")
-	ctx.Wizard = wizardState{
+	ctx.Wizard = WizardState{
 		Flow: "r", Step: 3,
 		NextPath: fmt.Sprintf("/g/%s/play/r/result?p1=%d&p2=%d", g.Slug, p1, p2),
 		BackPath: fmt.Sprintf("/g/%s/play/r/p2?p1=%d", g.Slug, p1),
@@ -511,7 +515,7 @@ func (s *Server) handleRecResult(w http.ResponseWriter, r *http.Request, g *stor
 
 func (s *Server) handleGameP1(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	ctx := s.basePlayContext(r, g, "Spiel eintragen")
-	ctx.Wizard = wizardState{
+	ctx.Wizard = WizardState{
 		Flow: "g", Step: 1,
 		NextPath: "/g/" + g.Slug + "/play/g/p2",
 		BackPath: "/g/" + g.Slug + "/play",
@@ -527,13 +531,13 @@ func (s *Server) handleGameP2(w http.ResponseWriter, r *http.Request, g *store.G
 		return
 	}
 	ctx := s.basePlayContext(r, g, "Spieler 2?")
-	ctx.Wizard = wizardState{
+	ctx.Players = filterPlayers(ctx.Players, p1)
+	ctx.Wizard = WizardState{
 		Flow: "g", Step: 2,
-		NextPath:  "/g/" + g.Slug + "/play/g/board?p1=" + fmt.Sprintf("%d", p1),
-		BackPath:  "/g/" + g.Slug + "/play/g/p1",
-		Headline:  "Und wer noch?",
-		PickKey:   "p2",
-		ExcludeID: p1,
+		NextPath: "/g/" + g.Slug + "/play/g/board?p1=" + fmt.Sprintf("%d", p1),
+		BackPath: "/g/" + g.Slug + "/play/g/p1",
+		Headline: "Und wer noch?",
+		PickKey:  "p2",
 	}
 	s.render(w, "play_pick_player", ctx)
 }
@@ -546,7 +550,7 @@ func (s *Server) handleGameBoard(w http.ResponseWriter, r *http.Request, g *stor
 		return
 	}
 	ctx := s.basePlayContext(r, g, "Brettgröße")
-	ctx.Wizard = wizardState{
+	ctx.Wizard = WizardState{
 		Flow: "g", Step: 3,
 		NextPath: fmt.Sprintf("/g/%s/play/g/finish?p1=%d&p2=%d", g.Slug, p1, p2),
 		BackPath: fmt.Sprintf("/g/%s/play/g/p2?p1=%d", g.Slug, p1),
@@ -570,7 +574,7 @@ func (s *Server) handleGameFinish(w http.ResponseWriter, r *http.Request, g *sto
 	}
 	ctx := s.basePlayContext(r, g, "Ergebnis")
 	ctx.Recommendation = rec
-	ctx.Wizard = wizardState{
+	ctx.Wizard = WizardState{
 		Flow: "g", Step: 4,
 		BackPath: fmt.Sprintf("/g/%s/play/g/board?p1=%d&p2=%d", g.Slug, p1, p2),
 		Headline: "Wer hat gewonnen?",
@@ -650,7 +654,7 @@ func (s *Server) handleGameCommit(w http.ResponseWriter, r *http.Request, g *sto
 }
 
 // basePlayContext gathers the bits every wizard step needs: the player
-// list (active only), recent games for the footer, and the flash.
+// list (active only) and recent games for the footer.
 func (s *Server) basePlayContext(r *http.Request, g *store.Group, title string) pageContext {
 	players, _ := s.Service.Store.ListPlayers(r.Context(), g.ID, false)
 	games, _ := s.Service.Store.ListRecentGames(r.Context(), g.ID, 6)
@@ -666,6 +670,18 @@ func (s *Server) basePlayContext(r *http.Request, g *store.Group, title string) 
 		RecentGames: games,
 		PlayerNames: pn,
 	}
+}
+
+// filterPlayers returns a copy of the active list with the given id
+// removed. Used by the p2 step so the template doesn't have to filter.
+func filterPlayers(in []store.Player, exclude int64) []store.Player {
+	out := make([]store.Player, 0, len(in))
+	for _, p := range in {
+		if p.ID != exclude {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func winnerName(winner string, b, w *store.Player) string {

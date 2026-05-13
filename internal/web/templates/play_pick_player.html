@@ -70,20 +70,16 @@
   </div>
   <div class="wizard-headline">{{.Wizard.Headline}}</div>
 
-  {{$shown := 0}}
+  {{if .Players}}
   <div class="player-grid">
     {{range .Players}}
-      {{if ne .ID $.Wizard.ExcludeID}}
-        {{$shown = add $shown 1}}
-        <a class="player-tile" style="background:{{tileColor .Name}}" href="{{$.Wizard.NextPath}}{{if eq $.Wizard.PickKey "p1"}}?{{else}}&{{end}}{{$.Wizard.PickKey}}={{.ID}}">
-          <span class="rank">{{rank .GoR}}</span>
-          {{.Name}}
-        </a>
-      {{end}}
+      <a class="player-tile" style="background:{{tileColor .Name}}" href="{{$.Wizard.NextPath}}{{if eq $.Wizard.PickKey "p1"}}?{{else}}&{{end}}{{$.Wizard.PickKey}}={{.ID}}">
+        <span class="rank">{{rank .GoR}}</span>
+        {{.Name}}
+      </a>
     {{end}}
   </div>
-
-  {{if eq $shown 0}}
+  {{else}}
   <div class="no-players">
     Keine Spieler in der Gruppe.<br>
     <strong>Sag deinem Trainer Bescheid</strong> — neue Spieler werden über den MCP-Server angelegt.

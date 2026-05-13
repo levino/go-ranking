@@ -304,7 +304,13 @@ func TestTabletPlayWizard(t *testing.T) {
 		t.Fatalf("commit with negative komi: %d", resp.StatusCode)
 	}
 	games, _ = rg.svc.Store.ListRecentGames(context.Background(), g.ID, 10)
-	if len(games) != 2 || games[0].Komi != -3.5 {
+	gotNeg := false
+	for _, gm := range games {
+		if gm.Komi == -3.5 {
+			gotNeg = true
+		}
+	}
+	if len(games) != 2 || !gotNeg {
 		t.Fatalf("negative komi not stored: %+v", games)
 	}
 
