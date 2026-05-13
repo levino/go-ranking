@@ -73,7 +73,7 @@
   {{if .Players}}
   <div class="player-grid">
     {{range .Players}}
-      <a class="player-tile" style="background:{{tileColor .Name}}" href="{{$.Wizard.NextPath}}{{if eq $.Wizard.PickKey "p1"}}?{{else}}&{{end}}{{$.Wizard.PickKey}}={{.ID}}">
+      <a class="player-tile" style="background:{{tileColor .Name}}" href="{{call $.Wizard.NextPathFor .ID}}">
         <span class="rank">{{rank .GoR}}</span>
         {{.Name}}
       </a>

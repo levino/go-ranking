@@ -198,21 +198,25 @@ type pageContext struct {
 	Selected       playSelection
 	SelectedKomi   float64
 	Wizard         WizardState
+	// NextBoard is the board-step's per-size link builder. It lives on
+	// pageContext rather than WizardState so play_pick_board.html can
+	// call it without html/template seeing a dynamic query value.
+	NextBoard func(board int) string
 }
 
 // WizardState carries the per-step navigation context for the play
-// wizard templates: where to go next/back, what to ask, and which
-// query-string key to write the user's pick into. Exported because
-// html/template's reflection-based field access is more reliable on
-// exported types than unexported ones.
+// wizard templates: where to go next/back and what to ask.
+//
+// NextPathFor is a function the template calls per player to build the
+// link target. Doing the URL construction in Go avoids html/template's
+// "ambiguous context within a URL" complaint when a dynamic query key
+// is interpolated into an href.
 type WizardState struct {
-	Flow      string // "r" (recommend) or "g" (record)
-	Step      int
-	Headline  string
-	NextPath  string
-	BackPath  string
-	PickKey   string // "p1" or "p2"
-	ExcludeID int64  // player to omit from the tile grid (e.g. already picked p1)
+	Flow        string // "r" (recommend) or "g" (record)
+	Step        int
+	Headline    string
+	BackPath    string
+	NextPathFor func(playerID int64) string
 }
 
 // playSelection echoes the previous picks for templates that need to
@@ -454,8 +458,14 @@ func (s *Server) handlePlayStart(w http.ResponseWriter, r *http.Request, g *stor
 
 func (s *Server) handleRecP1(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	ctx := s.basePlayContext(r, g, "Wer spielt?")
-	ctx.Wizard = WizardState{Flow: "r", Step: 1, NextPath: "/g/" + g.Slug + "/play/r/p2", BackPath: "/g/" + g.Slug + "/play",
-		Headline: "Wer ist der erste Spieler?", PickKey: "p1"}
+	ctx.Wizard = WizardState{
+		Flow: "r", Step: 1,
+		Headline: "Wer ist der erste Spieler?",
+		BackPath: "/g/" + g.Slug + "/play",
+		NextPathFor: func(id int64) string {
+			return fmt.Sprintf("/g/%s/play/r/p2?p1=%d", g.Slug, id)
+		},
+	}
 	s.render(w, "play_pick_player", ctx)
 }
 
@@ -469,9 +479,11 @@ func (s *Server) handleRecP2(w http.ResponseWriter, r *http.Request, g *store.Gr
 	ctx.Players = filterPlayers(ctx.Players, p1)
 	ctx.Wizard = WizardState{
 		Flow: "r", Step: 2,
-		NextPath: "/g/" + g.Slug + "/play/r/board?p1=" + fmt.Sprintf("%d", p1),
+		Headline: "Und wer ist Spieler 2?",
 		BackPath: "/g/" + g.Slug + "/play/r/p1",
-		Headline: "Und wer ist Spieler 2?", PickKey: "p2",
+		NextPathFor: func(id int64) string {
+			return fmt.Sprintf("/g/%s/play/r/board?p1=%d&p2=%d", g.Slug, p1, id)
+		},
 	}
 	s.render(w, "play_pick_player", ctx)
 }
@@ -486,9 +498,11 @@ func (s *Server) handleRecBoard(w http.ResponseWriter, r *http.Request, g *store
 	ctx := s.basePlayContext(r, g, "Wie groß ist das Brett?")
 	ctx.Wizard = WizardState{
 		Flow: "r", Step: 3,
-		NextPath: fmt.Sprintf("/g/%s/play/r/result?p1=%d&p2=%d", g.Slug, p1, p2),
-		BackPath: fmt.Sprintf("/g/%s/play/r/p2?p1=%d", g.Slug, p1),
 		Headline: "Wie groß ist das Brett?",
+		BackPath: fmt.Sprintf("/g/%s/play/r/p2?p1=%d", g.Slug, p1),
+	}
+	ctx.NextBoard = func(board int) string {
+		return fmt.Sprintf("/g/%s/play/r/result?p1=%d&p2=%d&board=%d", g.Slug, p1, p2, board)
 	}
 	s.render(w, "play_pick_board", ctx)
 }
@@ -517,9 +531,11 @@ func (s *Server) handleGameP1(w http.ResponseWriter, r *http.Request, g *store.G
 	ctx := s.basePlayContext(r, g, "Spiel eintragen")
 	ctx.Wizard = WizardState{
 		Flow: "g", Step: 1,
-		NextPath: "/g/" + g.Slug + "/play/g/p2",
+		Headline: "Wer hat gespielt? Spieler 1.",
 		BackPath: "/g/" + g.Slug + "/play",
-		Headline: "Wer hat gespielt? Spieler 1.", PickKey: "p1",
+		NextPathFor: func(id int64) string {
+			return fmt.Sprintf("/g/%s/play/g/p2?p1=%d", g.Slug, id)
+		},
 	}
 	s.render(w, "play_pick_player", ctx)
 }
@@ -534,10 +550,11 @@ func (s *Server) handleGameP2(w http.ResponseWriter, r *http.Request, g *store.G
 	ctx.Players = filterPlayers(ctx.Players, p1)
 	ctx.Wizard = WizardState{
 		Flow: "g", Step: 2,
-		NextPath: "/g/" + g.Slug + "/play/g/board?p1=" + fmt.Sprintf("%d", p1),
-		BackPath: "/g/" + g.Slug + "/play/g/p1",
 		Headline: "Und wer noch?",
-		PickKey:  "p2",
+		BackPath: "/g/" + g.Slug + "/play/g/p1",
+		NextPathFor: func(id int64) string {
+			return fmt.Sprintf("/g/%s/play/g/board?p1=%d&p2=%d", g.Slug, p1, id)
+		},
 	}
 	s.render(w, "play_pick_player", ctx)
 }
@@ -552,9 +569,11 @@ func (s *Server) handleGameBoard(w http.ResponseWriter, r *http.Request, g *stor
 	ctx := s.basePlayContext(r, g, "Brettgröße")
 	ctx.Wizard = WizardState{
 		Flow: "g", Step: 3,
-		NextPath: fmt.Sprintf("/g/%s/play/g/finish?p1=%d&p2=%d", g.Slug, p1, p2),
-		BackPath: fmt.Sprintf("/g/%s/play/g/p2?p1=%d", g.Slug, p1),
 		Headline: "Auf welchem Brett?",
+		BackPath: fmt.Sprintf("/g/%s/play/g/p2?p1=%d", g.Slug, p1),
+	}
+	ctx.NextBoard = func(board int) string {
+		return fmt.Sprintf("/g/%s/play/g/finish?p1=%d&p2=%d&board=%d", g.Slug, p1, p2, board)
 	}
 	s.render(w, "play_pick_board", ctx)
 }
