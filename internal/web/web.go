@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -114,9 +113,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /g/{slug}/play/players", s.requireGroupAdmin(s.handleAddPlayer))
 
 	// PWA manifest and icon (served at the origin root so iOS finds them
-	// without a per-group prefix).
+	// without a per-group prefix). http.ServeMux's path patterns only
+	// support whole-segment wildcards, so the sizes are wired explicitly.
 	mux.HandleFunc("GET /manifest.webmanifest", s.handleManifest)
-	mux.HandleFunc("GET /icon-{size}.png", s.handleIcon)
+	mux.HandleFunc("GET /icon-192.png", s.iconHandler(192))
+	mux.HandleFunc("GET /icon-512.png", s.iconHandler(512))
 
 	return s.withAuth(mux)
 }
@@ -580,19 +581,16 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 }`))
 }
 
-// handleIcon synthesises a PWA icon at the requested size: a black Go
-// stone (with a small highlight) on a white background. Generated on
-// the fly with image/png — no asset files to ship.
-func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
-	size, err := strconv.Atoi(r.PathValue("size"))
-	if err != nil || size < 16 || size > 1024 {
-		http.Error(w, "bad size", 400)
-		return
+// iconHandler returns a handler that synthesises a PWA icon at the
+// given size: a black Go stone (with a small highlight) on a white
+// background. Generated on the fly with image/png — no asset files.
+func (s *Server) iconHandler(size int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		img := drawStoneIcon(size)
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_ = png.Encode(w, img)
 	}
-	img := drawStoneIcon(size)
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	_ = png.Encode(w, img)
 }
 
 func drawStoneIcon(size int) image.Image {
