@@ -11,49 +11,179 @@
 <meta name="apple-mobile-web-app-title" content="Go-Liga">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600;700;800&family=Fraunces:wght@600;700;800;900&display=swap" rel="stylesheet">
 <style>
-:root { --fg: #222; --bg: #fafafa; --acc: #1c5d99; --muted: #666; --bd: #ddd; }
+:root {
+  --ink:     #14213d;
+  --paper:   #fafaf6;
+  --paper-2: #ffffff;
+  --line:    #d8d4c3;
+  --muted:   #6b6859;
+  --accent:  #d62828;
+  --accent2: #f77f00;
+  --ok:      #0f9d58;
+  --shadow:  0 4px 12px rgba(20,33,61,.06), 0 1px 3px rgba(20,33,61,.05);
+  --shadow-2: 0 12px 32px rgba(20,33,61,.12), 0 4px 8px rgba(20,33,61,.06);
+  --radius:  14px;
+}
 * { box-sizing: border-box; }
-body { font-family: -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; }
-header { background: #fff; border-bottom: 1px solid var(--bd); padding: .8rem 1.2rem; display:flex; justify-content:space-between; align-items:center; }
-header a { color: var(--acc); text-decoration: none; margin-right: 1rem; }
-main { max-width: 950px; margin: 1.2rem auto; padding: 0 1rem; }
-h1, h2, h3 { color: var(--fg); }
-table { border-collapse: collapse; width: 100%; background: #fff; }
-th, td { padding: .45rem .6rem; border-bottom: 1px solid var(--bd); text-align: left; }
-th { background: #eef2f7; }
-.btn { display:inline-block; padding:.4rem .8rem; background:var(--acc); color:#fff; border:0; border-radius:4px; text-decoration:none; cursor:pointer; font-size:.95rem; }
-.btn.secondary { background:#888; }
-.btn.danger { background:#c0392b; }
-form.inline { display:inline; }
-.flash { padding:.6rem 1rem; margin:1rem 0; border-radius:4px; background:#fff8c4; border:1px solid #e0d27a; }
-.flash.error { background:#fde2e2; border-color:#d99; }
-input, select { padding:.35rem .5rem; border:1px solid var(--bd); border-radius:3px; font-size: 1rem; }
-label { display:block; margin:.6rem 0 .2rem; }
+html, body { background: var(--paper); color: var(--ink); margin: 0; padding: 0; }
+body {
+  font-family: 'Lexend Deca', system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+h1, h2, h3 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 .8rem;
+}
+h1 { font-size: 2.2rem; line-height: 1.1; }
+h2 { font-size: 1.5rem; }
+header.site {
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: .8rem 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+header.site a { color: var(--ink); text-decoration: none; }
+header.site .brand { font-family: 'Fraunces', serif; font-weight: 800; font-size: 1.15rem; }
+header.site .links a { margin-right: 1rem; color: var(--muted); }
+header.site .links a:hover { color: var(--ink); }
+main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.2rem 5rem; }
+table { border-collapse: collapse; width: 100%; background: var(--paper-2); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+th, td { padding: .55rem .8rem; border-bottom: 1px solid var(--line); text-align: left; }
+th { background: #f0ece0; font-weight: 600; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+tr:last-child td { border-bottom: none; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  padding: .7rem 1.2rem;
+  background: var(--ink);
+  color: white;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 1rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform .08s ease;
+}
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn.ghost {
+  background: transparent;
+  color: var(--ink);
+}
+.btn.danger { background: var(--accent); border-color: var(--accent); }
+.btn.success { background: var(--ok); border-color: var(--ok); }
+.btn.huge { padding: 1.1rem 1.8rem; font-size: 1.25rem; border-radius: 16px; }
+
+input, select {
+  font-family: inherit;
+  font-size: 1rem;
+  padding: .55rem .7rem;
+  border: 1.5px solid var(--line);
+  background: var(--paper-2);
+  border-radius: 10px;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
 .muted { color: var(--muted); }
-nav.breadcrumb { font-size:.9rem; margin-bottom: 1rem; color: var(--muted); }
-nav.breadcrumb a { color: var(--acc); text-decoration: none; }
-.row { display:flex; gap:1rem; flex-wrap:wrap; }
-.row > * { flex:1 1 0; }
-.kpi { background:#fff; border:1px solid var(--bd); border-radius:6px; padding:.8rem 1rem; }
-.kpi .v { font-size:1.6rem; font-weight:700; }
+nav.breadcrumb { font-size: .9rem; margin-bottom: 1.2rem; color: var(--muted); }
+nav.breadcrumb a { color: var(--muted); text-decoration: none; }
+nav.breadcrumb a:hover { color: var(--ink); text-decoration: underline; }
+
+.flash {
+  padding: .8rem 1.2rem;
+  margin: 0 0 1.5rem;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #eaf6ee 0%, #d8eedf 100%);
+  border: 1px solid #b6d9c0;
+  color: #144d2b;
+  font-weight: 500;
+}
+
+.row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.row > * { flex: 1 1 0; }
+
+.kpi { background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--radius); padding: .9rem 1.1rem; box-shadow: var(--shadow); }
+.kpi .v { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 800; line-height: 1; }
+.kpi .muted { font-size: .85rem; }
+
+code {
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", monospace;
+  background: #f0ece0;
+  padding: .15rem .4rem;
+  border-radius: 5px;
+  font-size: .9rem;
+}
+
+/* Wizard-specific bits (used across play_* templates) */
+.wizard-shell {
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow-2);
+  padding: 1.8rem 1.8rem 2.2rem;
+  margin: .5rem auto;
+}
+.wizard-stepper {
+  display: flex;
+  gap: .35rem;
+  justify-content: center;
+  margin-bottom: 1.2rem;
+}
+.wizard-stepper span {
+  width: 2.2rem;
+  height: .35rem;
+  background: var(--line);
+  border-radius: 999px;
+  transition: background .2s;
+}
+.wizard-stepper span.on { background: var(--ink); }
+.wizard-headline {
+  font-family: 'Fraunces', serif;
+  font-weight: 800;
+  font-size: 2rem;
+  text-align: center;
+  letter-spacing: -.02em;
+  margin: .2rem 0 1.5rem;
+}
+.wizard-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+.wizard-actions .left { display: flex; gap: 1rem; }
 </style>
 </head>
 <body>
-<header>
+<header class="site">
   <div>
-    <a href="/"><strong>Go-Liga</strong></a>
-    {{if .User}}
-      {{if .Group}}<a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a>{{end}}
-      {{if .Group}}<a href="/g/{{.Group.Slug}}/players">Spieler</a>{{end}}
-      {{if .Group}}<a href="/g/{{.Group.Slug}}/sessions">Sessions</a>{{end}}
-    {{end}}
+    <a href="/" class="brand">⬤ Go-Liga</a>
   </div>
-  <div>
+  <div class="links">
     {{if .User}}
       <span class="muted">{{if .User.Name}}{{.User.Name}}{{else}}{{.User.Email}}{{end}}</span>
-      <form action="/logout" method="post" class="inline">
-        <button class="btn secondary" type="submit">Logout</button>
+      <form action="/logout" method="post" style="display:inline">
+        <button class="btn ghost" type="submit">Logout</button>
       </form>
     {{else}}
       <a class="btn" href="/auth/start">Anmelden</a>

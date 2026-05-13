@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestRecordGameUpdatesRatings(t *testing.T) {
 	weaker, _ := svc.Store.CreatePlayer(ctx, g.ID, "Weak", 800)
 	stronger, _ := svc.Store.CreatePlayer(ctx, g.ID, "Strong", 1500)
 
-	gm, err := svc.RecordGame(ctx, g.ID, weaker.ID, stronger.ID, rating.Board19, 7, true)
+	gm, err := svc.RecordGame(ctx, g.ID, weaker.ID, stronger.ID, rating.Board19, 7, math.NaN(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestRecordGameEvenGameUsesKomi65(t *testing.T) {
 	a, _ := svc.Store.CreatePlayer(ctx, g.ID, "A", 1000)
 	b, _ := svc.Store.CreatePlayer(ctx, g.ID, "B", 1000)
 
-	gm, err := svc.RecordGame(ctx, g.ID, a.ID, b.ID, rating.Board13, 0, true)
+	gm, err := svc.RecordGame(ctx, g.ID, a.ID, b.ID, rating.Board13, 0, math.NaN(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestRecordGameRejectsSamePlayer(t *testing.T) {
 	ctx := context.Background()
 	g, _ := svc.CreateGroup(ctx, "G")
 	a, _ := svc.Store.CreatePlayer(ctx, g.ID, "A", 1000)
-	_, err := svc.RecordGame(ctx, g.ID, a.ID, a.ID, rating.Board9, 0, true)
+	_, err := svc.RecordGame(ctx, g.ID, a.ID, a.ID, rating.Board9, 0, math.NaN(), true)
 	if err == nil || !strings.Contains(err.Error(), "differ") {
 		t.Fatalf("expected error, got %v", err)
 	}
@@ -119,7 +120,7 @@ func TestRecordGameRejectsForeignPlayer(t *testing.T) {
 	g2, _ := svc.CreateGroup(ctx, "G2")
 	a, _ := svc.Store.CreatePlayer(ctx, g1.ID, "A", 1000)
 	b, _ := svc.Store.CreatePlayer(ctx, g2.ID, "B", 1000)
-	if _, err := svc.RecordGame(ctx, g1.ID, a.ID, b.ID, rating.Board9, 0, true); err == nil {
+	if _, err := svc.RecordGame(ctx, g1.ID, a.ID, b.ID, rating.Board9, 0, math.NaN(), true); err == nil {
 		t.Fatal("expected error: players in different groups")
 	}
 }

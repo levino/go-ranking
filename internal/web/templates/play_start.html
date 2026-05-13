@@ -1,0 +1,88 @@
+{{define "content"}}
+<style>
+.start-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+.entry-card {
+  position: relative;
+  display: block;
+  padding: 2.2rem 1.8rem;
+  background: var(--paper-2);
+  border: 2px solid var(--line);
+  border-radius: 22px;
+  text-decoration: none;
+  color: var(--ink);
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  overflow: hidden;
+  min-height: 200px;
+}
+.entry-card:hover, .entry-card:active { transform: translateY(-3px); border-color: var(--ink); box-shadow: var(--shadow-2); }
+.entry-card .ico {
+  font-family: 'Fraunces', serif;
+  font-size: 4rem;
+  line-height: 1;
+  margin-bottom: .6rem;
+}
+.entry-card h2 { margin: 0 0 .3rem; font-size: 1.6rem; }
+.entry-card p { color: var(--muted); margin: 0; font-size: 1rem; }
+.entry-card.calc {
+  background: linear-gradient(135deg, #ffe5b4 0%, #f4a261 100%);
+  border-color: #f4a261;
+}
+.entry-card.record {
+  background: linear-gradient(135deg, #c8e6c9 0%, #66bb6a 100%);
+  border-color: #66bb6a;
+  color: #1b5e20;
+}
+.entry-card .step-hint { position: absolute; top: 1rem; right: 1.2rem; font-size: .85rem; color: rgba(20,33,61,.55); font-weight: 600; }
+
+.recent {
+  margin-top: 3rem;
+}
+.recent h3 { font-family: 'Fraunces', serif; font-size: 1.2rem; margin: 0 0 .6rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+</style>
+
+<nav class="breadcrumb"><a href="/">Start</a> · {{.Group.Name}}</nav>
+<h1>Hallo {{.Group.Name}}!</h1>
+<p class="muted">Was möchtest du machen?</p>
+
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+
+<div class="start-grid">
+  <a class="entry-card calc" href="/g/{{.Group.Slug}}/play/r/p1">
+    <div class="step-hint">3 Schritte</div>
+    <div class="ico">⚖</div>
+    <h2>Vorgabe berechnen</h2>
+    <p>Wer spielt gegen wen? Auf welchem Brett? Wir sagen die Vorgabe.</p>
+  </a>
+  <a class="entry-card record" href="/g/{{.Group.Slug}}/play/g/p1">
+    <div class="step-hint">4 Schritte</div>
+    <div class="ico">✓</div>
+    <h2>Spiel eintragen</h2>
+    <p>Spieler, Brett, Vorgabe und wer gewonnen hat — fertig.</p>
+  </a>
+</div>
+
+{{if .RecentGames}}
+<div class="recent">
+  <h3>Heute schon gespielt</h3>
+  <table>
+    <tr><th>Zeit</th><th>Schwarz</th><th>Weiß</th><th>Brett</th><th>Vorgabe</th><th>Sieger</th></tr>
+    {{range .RecentGames}}
+    <tr>
+      <td>{{.PlayedAt.Format "15:04"}}</td>
+      <td><strong>{{playerName $.PlayerNames .BlackPlayerID}}</strong></td>
+      <td>{{playerName $.PlayerNames .WhitePlayerID}}</td>
+      <td>{{.BoardSize}}</td>
+      <td>{{.Handicap}}{{if ne .Komi 6.5}}{{if ne .Komi 0.5}} / Komi {{printf "%.1f" .Komi}}{{end}}{{end}}</td>
+      <td>{{if eq .Winner "black"}}⚫ Schwarz{{else}}⚪ Weiß{{end}}</td>
+    </tr>
+    {{end}}
+  </table>
+</div>
+{{end}}
+{{end}}
+{{template "layout" .}}

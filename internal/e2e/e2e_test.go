@@ -193,7 +193,7 @@ func TestEndToEndMCPLifecycle(t *testing.T) {
 
 // ---- Tablet UI: full flow on a single page ------------------------------
 
-func TestTabletPlayFlow(t *testing.T) {
+func TestTabletPlayWizard(t *testing.T) {
 	rg := newRig(t)
 	owner, _, ownerTok := rg.loginAs("oidc-owner", "owner@example.com", "Owner")
 	mustToolOK(t, rg, ownerTok, "create_group", map[string]any{"slug": "g1", "name": "Group One"})
@@ -212,58 +212,109 @@ func TestTabletPlayFlow(t *testing.T) {
 		}
 	}
 
-	// Pairing calculator
-	u := fmt.Sprintf("%s/g/g1/play?action=recommend&p1=%d&p2=%d&board=13", rg.srv.URL, anna.ID, ben.ID)
-	resp, _ := owner.Get(u)
-	body, _ := io.ReadAll(resp.Body)
+	// Landing page lists both entry points.
+	resp, _ := owner.Get(rg.srv.URL + "/g/g1/play")
+	startBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !bytes.Contains(body, []byte("Ben")) || !bytes.Contains(body, []byte("Schwarz")) {
-		t.Errorf("recommendation not rendered: %s", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("play landing: %d", resp.StatusCode)
+	}
+	for _, want := range []string{"Vorgabe berechnen", "Spiel eintragen"} {
+		if !bytes.Contains(startBody, []byte(want)) {
+			t.Errorf("landing missing %q", want)
+		}
 	}
 
-	// Add new player inline
-	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/players", url.Values{
-		"name": {"Spontaneous Kid"}, "rank": {"30k"},
-	})
+	// Recommend wizard step 1: tiles for all active players.
+	resp, _ = owner.Get(rg.srv.URL + "/g/g1/play/r/p1")
+	pickBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("add player: %d", resp.StatusCode)
-	}
-	all, _ := rg.svc.Store.ListPlayers(context.Background(), g.ID, true)
-	if len(all) != 3 {
-		t.Fatalf("expected 3 players after add, got %d", len(all))
+	if !bytes.Contains(pickBody, []byte("Anna")) || !bytes.Contains(pickBody, []byte("Ben")) {
+		t.Errorf("p1 picker missing players: %s", pickBody)
 	}
 
-	// Record a game — preview step renders 200 with the confirmation
-	// page (no DB write).
+	// Recommend wizard step 2: p1 picked, must be excluded from list.
+	url2 := fmt.Sprintf("%s/g/g1/play/r/p2?p1=%d", rg.srv.URL, anna.ID)
+	resp, _ = owner.Get(url2)
+	p2Body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if bytes.Contains(p2Body, []byte("href=\"/g/g1/play/r/board?p1="+fmt.Sprintf("%d", anna.ID)+"&p2="+fmt.Sprintf("%d", anna.ID))) {
+		t.Errorf("p1 should be excluded from p2 list")
+	}
+	if !bytes.Contains(p2Body, []byte("Ben")) {
+		t.Errorf("Ben should still be in p2 list")
+	}
+
+	// Recommend result page.
+	resultURL := fmt.Sprintf("%s/g/g1/play/r/result?p1=%d&p2=%d&board=13", rg.srv.URL, anna.ID, ben.ID)
+	resp, _ = owner.Get(resultURL)
+	rb, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !bytes.Contains(rb, []byte("Ben")) || !bytes.Contains(rb, []byte("Schwarz spielt")) {
+		t.Errorf("result missing pieces: %s", rb)
+	}
+
+	// Record wizard: jump to the finish form (filled in by previous picks).
+	finishURL := fmt.Sprintf("%s/g/g1/play/g/finish?p1=%d&p2=%d&board=13", rg.srv.URL, anna.ID, ben.ID)
+	resp, _ = owner.Get(finishURL)
+	fb, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !bytes.Contains(fb, []byte("Schwarz gewinnt")) || !bytes.Contains(fb, []byte("Weiß gewinnt")) {
+		t.Errorf("finish page missing winner buttons: %s", fb)
+	}
+
+	// Submit winner → confirm page (no DB write yet).
 	form := url.Values{
 		"black": {fmt.Sprintf("%d", ben.ID)}, "white": {fmt.Sprintf("%d", anna.ID)},
-		"board": {"13"}, "handicap": {"4"}, "winner": {"black"},
+		"board": {"13"}, "handicap": {"4"}, "komi": {"0.5"}, "winner": {"black"},
 	}
-	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/record", form)
-	previewBody, _ := io.ReadAll(resp.Body)
+	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/g/confirm", form)
+	confirmBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("record_game preview: %d body %s", resp.StatusCode, previewBody)
+		t.Fatalf("confirm: %d body %s", resp.StatusCode, confirmBody)
 	}
-	if !bytes.Contains(previewBody, []byte("Ja, eintragen")) {
-		t.Errorf("preview page missing confirm button: %s", previewBody)
+	if !bytes.Contains(confirmBody, []byte("Ja, eintragen")) {
+		t.Errorf("confirm page missing commit button: %s", confirmBody)
 	}
 	games, _ := rg.svc.Store.ListRecentGames(context.Background(), g.ID, 10)
 	if len(games) != 0 {
-		t.Fatalf("preview must not write to DB, but got %d games", len(games))
+		t.Fatalf("confirm must not write to DB, but got %d games", len(games))
 	}
-	// Commit step — POST the same fields to /confirm, expect 302 + DB write.
-	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/record/confirm", form)
+
+	// Commit.
+	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/g/commit", form)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("record_game commit: %d", resp.StatusCode)
+		t.Fatalf("commit: %d", resp.StatusCode)
 	}
 	games, _ = rg.svc.Store.ListRecentGames(context.Background(), g.ID, 10)
 	if len(games) != 1 {
 		t.Fatalf("expected 1 game, got %d", len(games))
 	}
 
+	// Negative komi (Rückkomi) is accepted.
+	form2 := url.Values{
+		"black": {fmt.Sprintf("%d", anna.ID)}, "white": {fmt.Sprintf("%d", ben.ID)},
+		"board": {"9"}, "handicap": {"0"}, "komi": {"-3.5"}, "winner": {"white"},
+	}
+	resp, _ = owner.PostForm(rg.srv.URL+"/g/g1/play/g/commit", form2)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("commit with negative komi: %d", resp.StatusCode)
+	}
+	games, _ = rg.svc.Store.ListRecentGames(context.Background(), g.ID, 10)
+	gotNeg := false
+	for _, gm := range games {
+		if gm.Komi == -3.5 {
+			gotNeg = true
+		}
+	}
+	if len(games) != 2 || !gotNeg {
+		t.Fatalf("negative komi not stored: %+v", games)
+	}
+
+	// Stranger blocked from any /play route.
 	stranger, _, _ := rg.loginAs("oidc-stranger", "stranger@example.com", "Stranger")
 	resp, _ = stranger.Get(rg.srv.URL + "/g/g1/play")
 	resp.Body.Close()
