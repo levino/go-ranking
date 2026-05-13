@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/levino/go-ranking/internal/auth"
+	"github.com/levino/go-ranking/internal/docs"
 	"github.com/levino/go-ranking/internal/rating"
 	"github.com/levino/go-ranking/internal/service"
 	"github.com/levino/go-ranking/internal/store"
@@ -115,7 +116,7 @@ func (s *Server) loadTemplates() error {
 		},
 	}
 	pages := []string{
-		"index", "dashboard", "players", "admin",
+		"index", "dashboard", "players", "admin", "docs",
 		"play_start", "play_pick_player", "play_pick_board",
 		"play_result", "play_record_finish", "play_confirm",
 	}
@@ -174,6 +175,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /icon-192.png", s.iconHandler(192))
 	mux.HandleFunc("GET /icon-512.png", s.iconHandler(512))
 
+	// Documentation pages.
+	mux.HandleFunc("GET /docs", s.handleDocs)
+	mux.HandleFunc("GET /docs/{slug}", s.handleDocs)
+
 	return s.withAuth(mux)
 }
 
@@ -191,6 +196,11 @@ type pageContext struct {
 	RecentGames []store.Game
 	PlayerNames map[int64]string
 	GameCount   int
+
+	// Docs page extras.
+	DocsList   []docs.Page
+	DocCurrent string
+	DocBody    template.HTML
 
 	// Play page extras.
 	Recommendation *service.Recommendation
@@ -670,6 +680,39 @@ func (s *Server) handleGameCommit(w http.ResponseWriter, r *http.Request, g *sto
 	wp, _ := s.Service.Store.PlayerByID(r.Context(), gm.WhitePlayerID)
 	flash := fmt.Sprintf("%s vs %s — %s hat gewonnen.", bp.Name, wp.Name, winnerName(winner, bp, wp))
 	http.Redirect(w, r, "/g/"+g.Slug+"/play?flash="+url.QueryEscape(flash), http.StatusFound)
+}
+
+// handleDocs serves the embedded Markdown manual. The slug comes from
+// the path; if empty (i.e. just `/docs`), redirect to the first page.
+func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	pages := docs.List()
+	if len(pages) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	if slug == "" {
+		http.Redirect(w, r, "/docs/"+pages[0].Slug, http.StatusFound)
+		return
+	}
+	body := docs.Render(slug)
+	if body == "" {
+		http.NotFound(w, r)
+		return
+	}
+	var title string
+	for _, p := range pages {
+		if p.Slug == slug {
+			title = p.Title
+		}
+	}
+	s.render(w, "docs", pageContext{
+		Title:      title + " — Handbuch",
+		User:       userOf(r),
+		DocsList:   pages,
+		DocCurrent: slug,
+		DocBody:    template.HTML(body),
+	})
 }
 
 // basePlayContext gathers the bits every wizard step needs: the player

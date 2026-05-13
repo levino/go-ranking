@@ -365,6 +365,43 @@ func TestOAuthAuthorizationServerMetadata(t *testing.T) {
 	}
 }
 
+func TestDocsRenders(t *testing.T) {
+	rg := newRig(t)
+	// /docs redirects to the first page.
+	resp, err := http.Get(rg.srv.URL + "/docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("expected 302 for /docs root, got %d", resp.StatusCode)
+	}
+	// Direct page renders with the sidebar and content.
+	resp, err = http.Get(rg.srv.URL + "/docs/overview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("overview: %d body %s", resp.StatusCode, body)
+	}
+	for _, want := range []string{"Handbuch", "Überblick", "docs-nav"} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Errorf("docs body missing %q", want)
+		}
+	}
+	// Unknown page is 404.
+	resp, err = http.Get(rg.srv.URL + "/docs/nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown page: %d", resp.StatusCode)
+	}
+}
+
 func TestCORSPreflight(t *testing.T) {
 	rg := newRig(t)
 	req, _ := http.NewRequest("OPTIONS", rg.mcpURL, nil)

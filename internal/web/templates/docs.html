@@ -1,0 +1,124 @@
+{{define "content"}}
+<style>
+.docs-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 2.5rem;
+  margin-top: .5rem;
+}
+@media (max-width: 760px) {
+  .docs-shell { grid-template-columns: 1fr; gap: 1rem; }
+  .docs-nav { position: static !important; border: 1px solid var(--line); border-radius: 12px; padding: .8rem 1rem; }
+}
+.docs-nav {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+  font-size: .95rem;
+}
+.docs-nav h4 {
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  font-size: .8rem;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 .6rem;
+}
+.docs-nav ul { list-style: none; padding: 0; margin: 0; }
+.docs-nav li { margin: .3rem 0; }
+.docs-nav a {
+  display: block;
+  padding: .35rem .6rem;
+  color: var(--ink);
+  text-decoration: none;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+}
+.docs-nav a:hover { background: #f0ece0; }
+.docs-nav a.active { background: #fbf3d8; border-left-color: var(--accent2); font-weight: 600; }
+
+.docs-content {
+  max-width: 720px;
+}
+.docs-content h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 800;
+  font-size: 2.4rem;
+  margin: 0 0 1.2rem;
+  letter-spacing: -.02em;
+}
+.docs-content h2 {
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  font-size: 1.5rem;
+  margin: 2.2rem 0 .6rem;
+  letter-spacing: -.01em;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: .3rem;
+}
+.docs-content h3 {
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  margin: 1.6rem 0 .4rem;
+}
+.docs-content p { margin: 0 0 1rem; line-height: 1.65; }
+.docs-content ul { padding-left: 1.2rem; margin: 0 0 1rem; }
+.docs-content li { margin-bottom: .3rem; line-height: 1.55; }
+.docs-content code {
+  background: #f0ece0;
+  padding: .12rem .35rem;
+  border-radius: 4px;
+  font-size: .92em;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+}
+.docs-content pre {
+  background: #1e2a44;
+  color: #f0ece0;
+  padding: 1rem 1.2rem;
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: .9rem;
+  line-height: 1.55;
+  margin: 1rem 0 1.4rem;
+}
+.docs-content pre code {
+  background: none;
+  color: inherit;
+  padding: 0;
+  font-size: 1em;
+}
+.docs-content a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(214,40,40,.3);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+.docs-content a:hover { text-decoration-color: var(--accent); }
+.docs-content table {
+  font-size: .92rem;
+  margin: 1rem 0 1.4rem;
+}
+.docs-content table th { font-family: 'Lexend Deca', sans-serif; }
+.docs-content strong { font-weight: 700; }
+</style>
+
+<nav class="breadcrumb"><a href="/">Start</a> · Handbuch</nav>
+
+<div class="docs-shell">
+  <nav class="docs-nav">
+    <h4>Handbuch</h4>
+    <ul>
+      {{range .DocsList}}
+        <li><a href="/docs/{{.Slug}}"{{if eq .Slug $.DocCurrent}} class="active"{{end}}>{{.Title}}</a></li>
+      {{end}}
+    </ul>
+  </nav>
+  <article class="docs-content">
+    {{.DocBody}}
+  </article>
+</div>
+{{end}}
+{{template "layout" .}}
