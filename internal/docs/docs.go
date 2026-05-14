@@ -243,12 +243,83 @@ func inlineHTML(s string) string {
 	return out.String()
 }
 
-// inlineNonCode handles bold and links in a non-code segment.
+// inlineNonCode handles bold, italic, and links in a non-code segment.
+// Math is left as raw $...$ / $$...$$ markers so KaTeX can find them
+// after the page hits the browser (see layout.html for the auto-render
+// script tag). We escape HTML BEFORE applying markdown so user-written
+// `<` doesn't get treated as a tag, but math runs in its own pass
+// before escaping so $a < b$ stays valid TeX.
 func inlineNonCode(s string) string {
+	s, math := extractMath(s)
 	s = html.EscapeString(s)
 	s = boldRepl(s)
+	s = italicRepl(s)
 	s = linkRepl(s)
+	s = restoreMath(s, math)
 	return s
+}
+
+// extractMath pulls out $...$ inline and $$...$$ display math
+// segments, replacing them with placeholders. Returns the cleaned
+// string and the segments (in order of appearance).
+func extractMath(s string) (string, []string) {
+	var out strings.Builder
+	var math []string
+	for i := 0; i < len(s); {
+		if i+1 < len(s) && s[i] == '$' && s[i+1] == '$' {
+			j := strings.Index(s[i+2:], "$$")
+			if j >= 0 {
+				math = append(math, "$$"+s[i+2:i+2+j]+"$$")
+				out.WriteString("\x00MATH" + fmt.Sprintf("%d", len(math)-1) + "\x00")
+				i += 2 + j + 2
+				continue
+			}
+		}
+		if s[i] == '$' {
+			j := strings.Index(s[i+1:], "$")
+			if j >= 0 {
+				math = append(math, "$"+s[i+1:i+1+j]+"$")
+				out.WriteString("\x00MATH" + fmt.Sprintf("%d", len(math)-1) + "\x00")
+				i += 1 + j + 1
+				continue
+			}
+		}
+		out.WriteByte(s[i])
+		i++
+	}
+	return out.String(), math
+}
+
+func restoreMath(s string, math []string) string {
+	for idx, m := range math {
+		marker := "\x00MATH" + fmt.Sprintf("%d", idx) + "\x00"
+		s = strings.Replace(s, marker, m, 1)
+	}
+	return s
+}
+
+// italicRepl turns *x* into <em>x</em>. Single asterisks only — must
+// not be confused with the bold markers (**…**), which boldRepl has
+// already consumed. Greedy left-to-right matching.
+func italicRepl(s string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, "*")
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		j := strings.Index(s[i+1:], "*")
+		if j < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i])
+		b.WriteString("<em>")
+		b.WriteString(s[i+1 : i+1+j])
+		b.WriteString("</em>")
+		s = s[i+1+j+1:]
+	}
 }
 
 // boldRepl turns **x** into <strong>x</strong>. Greedy left-to-right
