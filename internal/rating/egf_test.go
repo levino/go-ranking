@@ -41,17 +41,18 @@ func TestExpectedSymmetric(t *testing.T) {
 
 func TestConFormulaMatchesEGFReferenceValues(t *testing.T) {
 	// Cross-check con(R) against the closed-form spec published with
-	// barcicki/GorCalculator and skillratings::egf.
+	// barcicki/GorCalculator and skillratings::egf:
+	//   con(R) = ((3300 - R) / 200) ^ 1.6
 	for _, c := range []struct {
 		R    float64
 		want float64
 	}{
-		{100, 88.448},   // ((3200/200)^1.6) ≈ 88.4
-		{2100, 16.741},  // 1 dan
-		{2700, 7.353},   // 7 dan
+		{100, 84.449},  // 16^1.6
+		{2100, 17.581}, //  6^1.6 — 1 dan
+		{2700, 5.800},  //  3^1.6 — 7 dan
 	} {
 		got := con(c.R)
-		if math.Abs(got-c.want) > 0.1 {
+		if math.Abs(got-c.want) > 0.05 {
 			t.Errorf("con(%.0f) = %.3f, want ~%.3f", c.R, got, c.want)
 		}
 	}
