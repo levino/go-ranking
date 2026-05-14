@@ -33,9 +33,38 @@ func TestUpdateUpsetSwingsMore(t *testing.T) {
 }
 
 func TestExpectedSymmetric(t *testing.T) {
-	a := expected(1000, 1000)
+	a := expectedScore(1000, 1000)
 	if math.Abs(a-0.5) > 1e-9 {
 		t.Fatalf("expected 0.5, got %.6f", a)
+	}
+}
+
+func TestConFormulaMatchesEGFReferenceValues(t *testing.T) {
+	// Cross-check con(R) against the closed-form spec published with
+	// barcicki/GorCalculator and skillratings::egf.
+	for _, c := range []struct {
+		R    float64
+		want float64
+	}{
+		{100, 88.448},   // ((3200/200)^1.6) ≈ 88.4
+		{2100, 16.741},  // 1 dan
+		{2700, 7.353},   // 7 dan
+	} {
+		got := con(c.R)
+		if math.Abs(got-c.want) > 0.1 {
+			t.Errorf("con(%.0f) = %.3f, want ~%.3f", c.R, got, c.want)
+		}
+	}
+}
+
+func TestBonusFormulaApproachesZeroAtHighRating(t *testing.T) {
+	// bonus(R) decays toward 0 above ~3000 GoR.
+	if b := bonus(2700); b > 0.1 {
+		t.Errorf("bonus(2700) = %.4f, expected small (<0.1)", b)
+	}
+	// bonus(R) is larger for low-rated players (deflation correction).
+	if b := bonus(100); b < 5 {
+		t.Errorf("bonus(100) = %.4f, expected substantial (>5)", b)
 	}
 }
 

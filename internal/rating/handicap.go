@@ -33,8 +33,21 @@ type Handicap struct {
 	Komi   float64 // komi awarded to white
 }
 
-// Per-stone GoR-equivalent value.  Smaller boards mean less ground
-// covered per stone, hence less rating advantage.
+// Per-stone GoR-equivalent value used when converting a placed
+// handicap into a rating bonus for the expected-score calculation.
+//
+// 19×19 uses the EGF value of 100 GoR per stone — one rank in the EGF
+// system maps to one handicap stone on the full board.
+//
+// Smaller boards use deliberately lower values for the RATING
+// computation, even though the THEORETICAL stone value is higher on
+// small boards (Wikipedia: 13×13 ≈ 2.5–3 ranks/stone, 9×9 ≈ 6
+// ranks/stone). The theoretical scaling drives only when stones are
+// recommended (rec9/rec13 are conservative with stone counts); for
+// rating points we use lower values to reflect how much we TRUST the
+// placed handicap to actually neutralize the gap — on tiny boards a
+// single overlooked move flips the result, so the rating shift on a
+// won/lost handicap game should be smaller, not larger.
 const (
 	stoneValue9  = 50
 	stoneValue13 = 70
@@ -113,30 +126,39 @@ func rec13(d float64) Handicap {
 	return Handicap{6, 0.5}
 }
 
+// rec19 — auf dem vollen Brett wird auf jeden Fall mit Steinen
+// ausgeglichen, **nicht** mit Rückkomi. Die Steine-Skala reicht bis 9;
+// erst wenn diese ausgeschöpft sind, kommt Rückkomi als Ergänzung
+// dazu (siehe Sensei's Library / EGF-Praxis).
+//
+// Zwischen "0 Steine + Komi 0,5" und "2 Steine + Komi 0,5" liegt nur
+// eine Komi-Stufe (kein 1-Stein), entsprechend der Go-Konvention.
 func rec19(d float64) Handicap {
 	switch {
 	case d < 100:
 		return Handicap{0, 6.5}
 	case d < 200:
-		return Handicap{0, 0.5} // leichter Ausgleich über Komi
+		return Handicap{0, 0.5} // Komi-Adjust statt 1 Stein
 	case d < 300:
-		return Handicap{0, -5.5} // Rückkomi statt 1 Stein
-	case d < 400:
 		return Handicap{2, 0.5}
-	case d < 500:
+	case d < 400:
 		return Handicap{3, 0.5}
-	case d < 600:
+	case d < 500:
 		return Handicap{4, 0.5}
-	case d < 700:
+	case d < 600:
 		return Handicap{5, 0.5}
-	case d < 800:
+	case d < 700:
 		return Handicap{6, 0.5}
-	case d < 900:
+	case d < 800:
 		return Handicap{7, 0.5}
-	case d < 1000:
+	case d < 900:
 		return Handicap{8, 0.5}
+	case d < 1000:
+		return Handicap{9, 0.5}
 	}
-	return Handicap{9, 0.5}
+	// >1000 GoR diff: 9 Steine sind ausgeschöpft, Rückkomi als zusätzlicher
+	// Ausgleich für den Schwächeren (Komi für Weiß wird negativ).
+	return Handicap{9, -5.5}
 }
 
 // HandicapBonus returns the GoR-equivalent of the placed handicap

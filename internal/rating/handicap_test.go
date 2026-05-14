@@ -38,22 +38,24 @@ func TestRecommended13x13Sample(t *testing.T) {
 }
 
 func TestRecommended19x19Spec(t *testing.T) {
+	// 19×19 nutzt KEIN Rückkomi als Zwischenstufe — direkt von Komi-
+	// adjust auf 2 Steine. Rückkomi erst, wenn 9 Steine erschöpft sind.
 	cases := []struct {
 		gap  float64
 		want int
 		komi float64
 	}{
 		{0, 0, 6.5},
-		{150, 0, 0.5},
-		{250, 0, -5.5}, // Rückkomi statt 1 Stein
-		{350, 2, 0.5},
-		{450, 3, 0.5},
-		{550, 4, 0.5},
-		{650, 5, 0.5},
-		{750, 6, 0.5},
-		{850, 7, 0.5},
-		{950, 8, 0.5},
-		{2000, 9, 0.5},
+		{150, 0, 0.5}, // Komi-Adjust statt 1 Stein
+		{250, 2, 0.5},
+		{350, 3, 0.5},
+		{450, 4, 0.5},
+		{550, 5, 0.5},
+		{650, 6, 0.5},
+		{750, 7, 0.5},
+		{850, 8, 0.5},
+		{950, 9, 0.5},
+		{1200, 9, -5.5}, // erst hier Rückkomi als Ergänzung
 	}
 	for _, c := range cases {
 		h := Recommended(2000+c.gap, 2000, Board19)

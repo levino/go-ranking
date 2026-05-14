@@ -1,57 +1,75 @@
 # Spielstärke (GoR)
 
-Go-Liga verwendet das **EGF-GoR-System** der European Go Federation. Es ist das offizielle Rating der europäischen Go-Verbände und für Schul-AGs eine gute Wahl: stabil, robust gegen Ausreißer, gut dokumentiert.
+Go-Liga benutzt das **EGF-Rating-System** der [European Go Federation](https://www.europeangodatabase.eu/EGD/EGF_rating_system.php) — das offizielle Punktesystem aller europäischen Go-Verbände.
 
-Quelle und Spezifikation: [europeangodatabase.eu/EGD/EGF_rating_system.php](https://www.europeangodatabase.eu/EGD/EGF_rating_system.php).
+## Die Skala
 
-## Was ist die GoR?
+Die EGF-GoR ist eine Zahl, die ungefähr die Spielstärke ausdrückt. Höhere Werte sind stärker. Pro Rangstufe liegen genau 100 GoR-Punkte. Verankert wird die Skala bei **1 Dan = 2100 GoR**:
 
-Die **GoR (Go Rating)** ist eine Zahl, die ungefähr die Spielstärke ausdrückt. Höhere Werte sind stärker. Faustregel:
+| GoR | Rang |
+|---|---|
+| 2700+ | 1 Pro (≈ 7 Dan Amateur) |
+| 2600 | 6 Dan |
+| 2100 | 1 Dan |
+| 2000 | 1 Kyu |
+| 1500 | 6 Kyu |
+| 1000 | 11 Kyu |
+| 500 | 16 Kyu |
+| 100 | 20 Kyu |
 
-- 100 ≈ Anfänger (30 Kyu)
-- 1000 ≈ 11 Kyu
-- 2050 ≈ 1 Dan
-- 3000 ≈ 10 Dan (theoretischer Wert)
+Quelle: [Wikipedia — Go ranks and ratings](https://en.wikipedia.org/wiki/Go_ranks_and_ratings), zitiert aus der EGF-Spec. Theoretisch geht die GoR bis -900 herunter (siehe [GorCalculator-Konstanten](https://github.com/barcicki/GorCalculator/blob/master/app/src/main/java/com/barcicki/gorcalculator/core/Calculator.java)), praktisch werden Werte unter 100 (= 20 Kyu) aber nicht differenziert — die EGF zeigt das als Untergrenze.
 
-Wir rechnen intern in dieser Skala — sie hat keine Lücken, ist linear, und damit gut geeignet für Statistik.
-
-## Kyu/Dan ↔ GoR
-
-Die EGF-Konvention nutzt 100-Punkt-Schritte pro Rang:
-
-```
-1 Dan      = 2050
-1 Kyu      = 1950
-5 Kyu      = 1550
-10 Kyu     = 1050
-15 Kyu     =  550
-20 Kyu     =   50
-```
-
-Wenn die Trainerin einen neuen Spieler mit "20k" anlegt, übersetzt Go-Liga das in eine Start-GoR von 50. Das ist nur eine Schätzung — nach den ersten Partien justiert sich der Wert.
+Wenn die Trainerin einen neuen Spieler mit Rang „15k" anlegt, übersetzt Go-Liga das in eine Start-GoR von 550. Das ist nur eine Schätzung — nach den ersten Partien justiert sich der Wert.
 
 ## Wie wird die GoR nach einer Partie angepasst?
 
-Die zentrale Idee: jeder Spieler hat eine "erwartete Gewinn­wahrscheinlichkeit" basierend auf der GoR-Differenz. Wer mehr gewinnt als erwartet, steigt; wer weniger gewinnt als erwartet, fällt.
+Die EGF-Formel (Stand seit April 2021, [skillratings::egf](https://docs.rs/skillratings/latest/src/skillratings/egf.rs.html) bzw. [barcicki/GorCalculator/Calculator.java](https://github.com/barcicki/GorCalculator/blob/master/app/src/main/java/com/barcicki/gorcalculator/core/Calculator.java)) hat drei Komponenten.
 
-Konkret:
+**Erwartetes Ergebnis** für Spieler A gegen B:
 
-```
-exp_score = 1 / (1 + 10^((opp_gor - own_gor + bonus) / 200))
-new_gor   = own_gor + K * (actual_score - exp_score)
-```
+$$
+\mathrm{SE}(A, B) = \frac{1}{1 + \exp(\beta(R_B) - \beta(R_A))}
+\quad\text{mit}\quad
+\beta(R) = -7 \cdot \ln(3300 - R)
+$$
 
-Dabei ist:
+Bei einer Vorgabe von $h$ Steinen für Schwarz wird vor der Rechnung Schwarz' GoR temporär um $100 \cdot (h - 0.5)$ erhöht — die EGF rechnet Vorgabe-Steine als Rating-Bonus.
 
-- `actual_score` = 1 bei Sieg, 0 bei Niederlage.
-- `opp_gor` = GoR des Gegners.
-- `bonus` = Vorgabe­bonus (in GoR-Punkten ausgedrückt). Wenn ich mit Vorgabe spiele, wird mein effektiver Gegner schwächer berechnet.
-- `K` = Volatilitäts­faktor. EGF skaliert K mit der eigenen Stärke: schwache Spieler bewegen sich schneller (K bis 116), Dan-Spieler langsamer (K ab 10). Genaue Tabelle in `internal/rating/egf.go`.
+**Volatilitäts­koeffizient** (auch *con* genannt):
 
-Beide Spieler werden in derselben Partie angepasst — der eine gewinnt das, was der andere verliert, allerdings mit unterschiedlichen K-Faktoren.
+$$
+\mathrm{con}(R) = \left(\frac{3300 - R}{200}\right)^{1.6}
+$$
 
-## Warum gerade dieses System?
+`con` ist groß bei niedrigen Ratings (Anfänger bewegen sich schnell) und klein bei Dan-Spielern (deren GoR ist stabil).
 
-- **Symmetrisch**: Vorgabe-Spiele werden fair gerechnet, weil der Bonus auf die Erwartung wirkt, nicht auf den absoluten Wert.
-- **Lokal anpassbar**: K-Faktor sorgt dafür, dass Anfänger nicht ewig im Rauschen hängen, sondern schnell ihre Niveau-Stufe finden.
-- **Bekannt**: Wenn ein Kind auch im Verein spielt, läuft dort dasselbe System. Die Werte sind übertragbar.
+**Anti-Deflations-Bonus**:
+
+$$
+\mathrm{bonus}(R) = \frac{\ln\bigl(1 + \exp\bigl(\tfrac{2300 - R}{80}\bigr)\bigr)}{5}
+$$
+
+Dieser kleine Bonus kompensiert die Tendenz des Systems, in Anfänger-Pools insgesamt Rating zu verlieren.
+
+**Update-Formel**:
+
+$$
+R_\text{neu} = R + \mathrm{con}(R) \cdot \bigl(S - \mathrm{SE}\bigr) + \mathrm{bonus}(R)
+$$
+
+Wobei $S = 1$ bei Sieg, $S = 0$ bei Niederlage. Beide Spieler werden in derselben Partie aktualisiert, jeder mit seinem eigenen `con`.
+
+## GoR-Snapshot pro Partie
+
+**Wichtig**: Wenn eine Partie eingetragen wird, werden die GoR-Werte beider Spieler *zum Zeitpunkt der Eintragung* zusammen mit der Partie eingefroren (Felder `black_gor_before`, `black_gor_after`, `white_gor_before`, `white_gor_after` in der Datenbank). Das hat zwei Konsequenzen:
+
+- Die Spieler-Tabelle führt nur die *aktuelle* GoR; in den Partien steht der historische Wert.
+- Eine nachträgliche Änderung der Spieler-GoR (z.B. durch externe Kalibrierung, siehe unten) ändert frühere Partien *nicht*.
+
+Eine vollständige Neuberechnung der Historie wäre möglich (chronologisch alle Partien mit neuen Startwerten durchrechnen), ist aktuell aber kein Knopf in der App.
+
+## Externe Rating-Quellen abgleichen
+
+Falls in Zukunft Spieler auch auf [OGS](https://online-go.com), [KGS](https://www.gokgs.com), oder einem offiziellen EGF-Turnier spielen, wäre es sinnvoll, deren externes Rating als Anker zu nutzen — gerade weil unser Pool klein ist und das interne Rating dadurch zu langsam justieren könnte.
+
+Geplanter Ansatz (noch nicht implementiert): die Spieler-Tabelle bekommt optionale Felder `external_source` (z.B. `"ogs"`, `"egd"`) und `external_id`. Ein Sync-Job zieht regelmäßig deren aktuelle Werte; bei großer Abweichung kann die interne GoR sanft an den externen Wert herangezogen werden (kein harter Reset). Das ist aber Roadmap-Material, kein Code heute.
