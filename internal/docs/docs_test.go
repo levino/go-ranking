@@ -92,9 +92,35 @@ func TestRenderList(t *testing.T) {
 }
 
 func TestRenderRawHTMLPassThrough(t *testing.T) {
-	// Tables in the manual are hand-written as HTML.
+	// Tables can also be hand-written as raw HTML when finer control is
+	// needed.
 	got := toHTML("<table><tr><td>x</td></tr></table>\n")
 	if !strings.Contains(got, "<table>") {
 		t.Errorf("raw HTML stripped: %s", got)
+	}
+}
+
+func TestRenderPipeTable(t *testing.T) {
+	md := "| GoR | Rang |\n|---|---|\n| 2100 | 1 Dan |\n| 100 | 20 Kyu |\n"
+	got := toHTML(md)
+	for _, want := range []string{
+		"<table>", "<thead>", "<th>GoR</th>", "<th>Rang</th>",
+		"<tbody>", "<td>2100</td>", "<td>1 Dan</td>", "<td>20 Kyu</td>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("pipe table missing %q in: %s", want, got)
+		}
+	}
+	// Ensure we did not emit the raw `|` text as a paragraph.
+	if strings.Contains(got, "<p>| GoR") {
+		t.Errorf("table fell through as paragraph: %s", got)
+	}
+}
+
+func TestRenderPipeTableLinkInCell(t *testing.T) {
+	md := "| Quelle |\n|---|\n| [EGF](https://example.com) |\n"
+	got := toHTML(md)
+	if !strings.Contains(got, `<a href="https://example.com">EGF</a>`) {
+		t.Errorf("link inside table cell not rendered: %s", got)
 	}
 }

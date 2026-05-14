@@ -111,8 +111,40 @@ func toHTML(md string) string {
 			inList = false
 		}
 	}
-	for _, raw := range lines {
+	for idx := 0; idx < len(lines); idx++ {
+		raw := lines[idx]
 		line := strings.TrimRight(raw, " \t\r")
+
+		// Pipe tables: header row + separator (---) + zero or more data
+		// rows. Recognised only outside code blocks. Cell contents go
+		// through inline rendering so links and bold work inside tables.
+		if !inCode && isTableHeader(line) && idx+1 < len(lines) && isTableSeparator(lines[idx+1]) {
+			flushPara()
+			closeList()
+			headers := splitTableRow(line)
+			b.WriteString("<table>\n<thead><tr>")
+			for _, h := range headers {
+				b.WriteString("<th>")
+				b.WriteString(inlineHTML(h))
+				b.WriteString("</th>")
+			}
+			b.WriteString("</tr></thead>\n<tbody>\n")
+			j := idx + 2
+			for j < len(lines) && isTableHeader(strings.TrimRight(lines[j], " \t\r")) {
+				cells := splitTableRow(strings.TrimRight(lines[j], " \t\r"))
+				b.WriteString("<tr>")
+				for _, c := range cells {
+					b.WriteString("<td>")
+					b.WriteString(inlineHTML(c))
+					b.WriteString("</td>")
+				}
+				b.WriteString("</tr>\n")
+				j++
+			}
+			b.WriteString("</tbody>\n</table>\n")
+			idx = j - 1
+			continue
+		}
 
 		// Code fence open/close.
 		if strings.HasPrefix(line, "```") {
@@ -183,6 +215,47 @@ func toHTML(md string) string {
 		b.WriteString("</code></pre>\n")
 	}
 	return b.String()
+}
+
+// isTableHeader returns true for a line that looks like a pipe-table
+// row: starts with `|` and contains at least one more `|`.
+func isTableHeader(line string) bool {
+	if !strings.HasPrefix(line, "|") {
+		return false
+	}
+	return strings.Count(line, "|") >= 2
+}
+
+// isTableSeparator returns true for a line like `|---|---|` or
+// `| :---: | ---: |` (alignment markers are accepted but ignored).
+func isTableSeparator(line string) bool {
+	line = strings.TrimRight(line, " \t\r")
+	if !strings.HasPrefix(line, "|") {
+		return false
+	}
+	for _, c := range line {
+		switch c {
+		case '|', '-', ':', ' ', '\t':
+		default:
+			return false
+		}
+	}
+	return strings.Contains(line, "---")
+}
+
+// splitTableRow splits `| a | b | c |` into ["a", "b", "c"]. Trims
+// outer pipes and whitespace; empty trailing cell from the closing `|`
+// is dropped.
+func splitTableRow(line string) []string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "|")
+	line = strings.TrimSuffix(line, "|")
+	parts := strings.Split(line, "|")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, strings.TrimSpace(p))
+	}
+	return out
 }
 
 // parseHeading returns the heading text and level (1-3), or 0 if the
