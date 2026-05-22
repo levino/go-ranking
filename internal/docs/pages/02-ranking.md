@@ -4,7 +4,7 @@ Go-Liga benutzt das **Rating-System von [Online-Go.com](https://online-go.com) (
 
 ## Warum OGS und nicht EGF?
 
-Das EGF-System der European Go Federation wertet zwar Vorgabepartien, ist aber brettgrößen-blind und kennt nur Steine, kein Komi. Genau das ist auf 9×9 unbrauchbar. OGS rechnet Vorgabe **brettgrößen- und komi-bewusst** (siehe [Vorgabe und Komi](/docs/03-handicap)) und sieht ausdrücklich vor, dass man Spieler allein auf 9×9 bewertet — ideal für eine Kinder-AG.
+Das EGF-System der European Go Federation wertet zwar Vorgabepartien, ist aber brettgrößen-blind und kennt nur Steine, kein Komi. Genau das ist auf 9×9 unbrauchbar. OGS rechnet Vorgabe **brettgrößen- und komi-bewusst** (siehe [Vorgabe und Komi](/docs/handicap)) und sieht ausdrücklich vor, dass man Spieler allein auf 9×9 bewertet — ideal für eine Kinder-AG.
 
 ## Die drei Glicko-2-Werte
 
@@ -45,7 +45,7 @@ Nach der OGS-v5-Regel wird beim Aktualisieren einer Brett-Kategorie die *eigene*
 
 Pro Partie ist genau eine „Rating-Periode" mit einem Spiel. Für jeden Spieler wird die Glicko-2-Aktualisierung gerechnet:
 
-- **Erwartetes Ergebnis** $E$ aus der Rating-Differenz (die Vorgabe verschiebt dabei den Gegner, siehe [Vorgabe und Komi](/docs/03-handicap)).
+- **Erwartetes Ergebnis** $E$ aus der Rating-Differenz (die Vorgabe verschiebt dabei den Gegner, siehe [Vorgabe und Komi](/docs/handicap)).
 - **Neues Rating, neue Deviation, neue Volatility** nach dem Glicko-2-Verfahren (Schritt 3–8 des Glickman-Papers).
 
 Sieg gegen einen stärkeren Gegner hebt das Rating stark, Niederlage gegen einen schwächeren senkt es; wie stark, hängt von beiden Deviations ab.
@@ -56,4 +56,10 @@ Bei jeder Eintragung wird die *Gesamt*-Bewertung beider Spieler vorher und nachh
 
 ## Bewertungen neu berechnen
 
-Auf dem Gruppen-Dashboard gibt es **„Bewertungen neu berechnen"**. Das spielt die *komplette* Partie-Historie chronologisch erneut durch die Engine — von jedem Spieler-Startwert (Seed) an. Der Vorgang ist deterministisch (gleiche Partien → gleiches Ergebnis) und beliebig oft wiederholbar. Nützlich nach einer Korrektur an Altdaten oder zur Migration.
+Bei Bedarf lässt sich die *komplette* Partie-Historie chronologisch erneut durch die Engine spielen — von jedem Spieler-Startwert (Seed) an. Der Vorgang ist deterministisch (gleiche Partien → gleiches Ergebnis) und beliebig oft wiederholbar. Nützlich nach einer Korrektur an Altdaten oder einem Eingriff in die Startwerte.
+
+Ausgelöst wird er über den `recompute`-Befehl des Server-Binaries — im Cluster also:
+
+```
+kubectl -n go-liga exec deploy/go-liga -- /go-liga recompute
+```
