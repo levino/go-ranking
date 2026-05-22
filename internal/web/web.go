@@ -154,7 +154,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /g/{slug}/admins", s.requireGroupAdmin(s.handleAdminsGET))
 	mux.HandleFunc("GET /g/{slug}/players", s.requireGroupAdmin(s.handlePlayersGET))
 	mux.HandleFunc("GET /g/{slug}/p/{id}", s.requireGroupAdmin(s.handlePlayerProfile))
-	mux.HandleFunc("POST /g/{slug}/recompute", s.requireGroupAdmin(s.handleRecompute))
 
 	// Tablet UI — a multi-step wizard the kids tap through.
 	// /play landing has two entry buttons: Vorgabe-Rechner & Spiel-Eintrag.
@@ -521,16 +520,6 @@ func (s *Server) handlePlayerProfile(w http.ResponseWriter, r *http.Request, g *
 		Title: p.Name, User: userOf(r), Group: g,
 		Player: p, RatingRows: rows, ProfileGames: rev, PlayerNames: pn,
 	})
-}
-
-// handleRecompute replays the group's full game history through the
-// rating engine, rebuilding every rating from the players' seeds.
-func (s *Server) handleRecompute(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	if err := s.Service.RecomputeGroup(r.Context(), g.ID); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	http.Redirect(w, r, "/g/"+g.Slug, http.StatusFound)
 }
 
 // handlePlayStart is the landing page: two big entry buttons.

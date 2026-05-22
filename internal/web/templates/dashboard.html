@@ -9,28 +9,18 @@
   margin-bottom: .8rem;
 }
 .dash-title h1 { margin: 0; }
-.dash-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 @media (max-width: 640px) {
   .dash-title { gap: .6rem; }
   .dash-title .btn { width: 100%; }
-  .dash-actions { width: 100%; }
-  .dash-actions .btn, .dash-actions form { flex: 1; }
-  .dash-actions .btn { width: 100%; }
   .row { gap: .6rem; }
   .kpi { padding: .7rem .9rem; }
   .kpi .v { font-size: 1.6rem; }
 }
-.btn-secondary { background: #6b7280; }
 </style>
 <nav class="breadcrumb"><a href="/">Start</a> · {{.Group.Name}}</nav>
 <div class="dash-title">
   <h1>{{.Group.Name}}</h1>
-  <div class="dash-actions">
-    <form method="post" action="/g/{{.Group.Slug}}/recompute" onsubmit="return confirm('Alle Bewertungen aus der Partie-Historie neu berechnen?');">
-      <button class="btn btn-secondary" type="submit">Bewertungen neu berechnen</button>
-    </form>
-    <a class="btn" href="/g/{{.Group.Slug}}/play">Spielen</a>
-  </div>
+  <a class="btn" href="/g/{{.Group.Slug}}/play">Spielen</a>
 </div>
 
 <div class="row">
