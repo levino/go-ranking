@@ -104,6 +104,9 @@ func (s *Service) RecordGame(ctx context.Context, groupID, blackID, whiteID int6
 	if isNaN(komi) {
 		komi = defaultKomi(stones)
 	}
+	// Komi must be a half-integer — a whole number would allow a draw,
+	// which go-liga cannot record.
+	komi = rating.NormalizeKomi(komi)
 
 	category := board.String()
 	blackCat, blackCatGames := s.loadCategory(ctx, black, category)

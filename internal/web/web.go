@@ -699,6 +699,9 @@ func (s *Server) handleGameConfirm(w http.ResponseWriter, r *http.Request, g *st
 	white, _ := parseInt64(r.FormValue("white"))
 	handicap, _ := parseInt64(r.FormValue("handicap"))
 	komi, _ := parseFloat(r.FormValue("komi"))
+	// Snap komi to a half-integer so the preview matches what gets
+	// recorded (RecordGame normalises again on commit).
+	komi = rating.NormalizeKomi(komi)
 	winner := r.FormValue("winner")
 	board, err := rating.ParseBoardSize(r.FormValue("board"))
 	if err != nil || black == 0 || white == 0 || (winner != "black" && winner != "white") {

@@ -180,3 +180,20 @@ func TestRecordGameRejectsForeignPlayer(t *testing.T) {
 		t.Fatal("expected error: players in different groups")
 	}
 }
+
+// A komi typed as a whole number must be snapped to a half-integer on
+// record — otherwise the game could end in a draw.
+func TestRecordGameNormalizesKomi(t *testing.T) {
+	svc := newSvc(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroup(ctx, "G")
+	a, _ := svc.Store.CreatePlayer(ctx, g.ID, "A", 1000)
+	b, _ := svc.Store.CreatePlayer(ctx, g.ID, "B", 1000)
+	gm, err := svc.RecordGame(ctx, g.ID, a.ID, b.ID, rating.Board9, 0, 1.0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gm.Komi == math.Trunc(gm.Komi) {
+		t.Errorf("recorded whole-number komi %.1f — draws would be possible", gm.Komi)
+	}
+}

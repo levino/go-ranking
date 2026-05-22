@@ -114,13 +114,16 @@ func Recommended(stronger, weaker float64, board BoardSize) Handicap {
 		}
 		komi := perfectKomi - head + stoneValue*float64(numExtra)
 		if komi >= recKomiMin || stones == recMaxStones {
-			return Handicap{Stones: stones, Komi: roundHalf(clamp(komi, -50, recKomiMax))}
+			return Handicap{Stones: stones, Komi: NormalizeKomi(clamp(komi, -50, recKomiMax))}
 		}
 	}
 	return Handicap{Stones: 0, Komi: recKomiMax}
 }
 
-// roundHalf rounds to the nearest 0.5 (a playable komi value).
-func roundHalf(v float64) float64 {
-	return math.Round(v*2) / 2
+// NormalizeKomi snaps a komi value to the nearest half-integer of the
+// form n+0.5 (…, -1.5, -0.5, 0.5, 1.5, …). A whole-number komi is never
+// produced: with integer area/territory scoring it would permit a drawn
+// game (jigo), and go-liga has no result for a draw.
+func NormalizeKomi(v float64) float64 {
+	return math.Round(v-0.5) + 0.5
 }

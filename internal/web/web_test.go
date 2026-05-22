@@ -284,3 +284,33 @@ func TestWebHasNoWriteEndpoints(t *testing.T) {
 		}
 	}
 }
+
+// The game-entry finish page must offer a colour swap — the kids do not
+// always play the colours the recommendation assigned.
+func TestGameFinishPageHasColorSwap(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroupWithSlug(ctx, "g", "G")
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	_ = svc.Store.AddGroupAdmin(ctx, u.ID, g.ID)
+	pia, _ := svc.Store.CreatePlayer(ctx, g.ID, "Pia", 900)
+	tom, _ := svc.Store.CreatePlayer(ctx, g.ID, "Tom", 700)
+
+	c := loggedInClient(t, ts, signer, u.ID)
+	url := ts.URL + "/g/g/play/g/finish?p1=" + strconv.FormatInt(pia.ID, 10) +
+		"&p2=" + strconv.FormatInt(tom.ID, 10) + "&board=9"
+	resp, err := c.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("finish page status %d: %s", resp.StatusCode, body)
+	}
+	for _, want := range []string{"Farben tauschen", "swapColors(", `id="f-black"`, `id="f-white"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("finish page missing %q", want)
+		}
+	}
+}

@@ -150,3 +150,33 @@ func FromRankMust(t *testing.T, s string) float64 {
 	}
 	return r
 }
+
+func TestNormalizeKomiAlwaysHalf(t *testing.T) {
+	for x := -20.0; x <= 20.0; x += 0.1 {
+		k := NormalizeKomi(x)
+		if k-math.Floor(k) != 0.5 {
+			t.Errorf("NormalizeKomi(%.2f) = %.2f — not a half-integer", x, k)
+		}
+	}
+	for _, c := range []struct{ in, want float64 }{
+		{0.5, 0.5}, {6.5, 6.5}, {1.0, 1.5}, {2.0, 2.5},
+		{0.14, 0.5}, {0.9, 0.5}, {1.1, 1.5}, {-5.5, -5.5},
+	} {
+		if got := NormalizeKomi(c.in); got != c.want {
+			t.Errorf("NormalizeKomi(%.2f) = %.2f, want %.2f", c.in, got, c.want)
+		}
+	}
+}
+
+// A whole-number komi would permit a drawn game — Recommended must
+// never produce one, on any board, for any rating gap.
+func TestRecommendedKomiNeverWhole(t *testing.T) {
+	for _, board := range []BoardSize{Board9, Board13, Board19} {
+		for d := 0.0; d < 2000; d += 17 {
+			h := Recommended(1000+d, 1000, board)
+			if h.Komi == math.Trunc(h.Komi) {
+				t.Errorf("%s gap %.0f: whole-number komi %.1f", board, d, h.Komi)
+			}
+		}
+	}
+}
