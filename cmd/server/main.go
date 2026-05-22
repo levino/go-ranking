@@ -11,6 +11,14 @@
 //	GO_LIGA_OIDC_CLIENT_SECRET   OIDC client secret (web app) from Zitadel
 //	GO_LIGA_OIDC_REDIRECT_URL    e.g. https://ranking.go-ag.levinkeller.de/auth/callback
 //
+// With no arguments the binary starts the server. The single subcommand
+//
+//	go-liga recompute
+//
+// replays every group's game history through the rating engine and
+// rewrites the stored ratings — run it on demand (e.g. via kubectl exec)
+// after a rating-model change. Only GO_LIGA_DB is needed for it.
+//
 // The MCP endpoint is its own OAuth 2.1 authorization server (with
 // Dynamic Client Registration) for MCP clients like Claude.ai. It
 // rides on top of the OIDC session: the upstream IdP (Zitadel)
@@ -39,9 +47,48 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "recompute":
+			if err := recompute(); err != nil {
+				log.Fatalf("fatal: %v", err)
+			}
+			return
+		default:
+			log.Fatalf("unknown subcommand %q (known: recompute)", os.Args[1])
+		}
+	}
 	if err := run(); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}
+}
+
+// recompute replays every group's full game history through the rating
+// engine and rewrites the stored ratings. It is the manual replacement
+// for the old run-once-at-startup repair: trigger it on demand with
+//
+//	kubectl -n go-liga exec deploy/go-liga -- /go-liga recompute
+func recompute() error {
+	st, err := store.Open(envOr("GO_LIGA_DB", "go-liga.db"))
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer st.Close()
+
+	svc := service.New(st)
+	ctx := context.Background()
+	groups, err := svc.Store.ListGroups(ctx)
+	if err != nil {
+		return fmt.Errorf("list groups: %w", err)
+	}
+	for _, g := range groups {
+		if err := svc.RecomputeGroup(ctx, g.ID); err != nil {
+			return fmt.Errorf("recompute %s: %w", g.Slug, err)
+		}
+		log.Printf("recomputed group %q", g.Slug)
+	}
+	log.Printf("recompute done: %d group(s)", len(groups))
+	return nil
 }
 
 func run() error {
@@ -74,9 +121,6 @@ func run() error {
 	defer st.Close()
 
 	svc := service.New(st)
-	if err := svc.RepairRatings(context.Background()); err != nil {
-		return fmt.Errorf("repair ratings: %w", err)
-	}
 	signer := auth.NewSigner(key)
 
 	webSrv, err := web.New(svc, signer, oidcCfg)

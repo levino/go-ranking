@@ -158,56 +158,6 @@ func TestRecomputeGroupReproducesRatings(t *testing.T) {
 	}
 }
 
-// TestRepairRatingsFixesBrokenV3 simulates the state the v3 migration
-// left behind (deviation reset to 350, empty per-board grid) and checks
-// RepairRatings reconstructs correct ratings from the game history.
-func TestRepairRatingsFixesBrokenV3(t *testing.T) {
-	svc := newSvc(t)
-	ctx := context.Background()
-	g, _ := svc.CreateGroup(ctx, "Group")
-	a, _ := svc.Store.CreatePlayer(ctx, g.ID, "A", 1000)
-	b, _ := svc.Store.CreatePlayer(ctx, g.ID, "B", 700)
-	for i := 0; i < 6; i++ {
-		if _, err := svc.RecordGame(ctx, g.ID, b.ID, a.ID, rating.Board9, 0, math.NaN(), i%2 == 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, _ := svc.Store.PlayerByID(ctx, a.ID)
-
-	// Simulate the broken v3 state: deviation maxed out, grid wiped.
-	if _, err := svc.Store.DB.Exec(`UPDATE players SET deviation=350`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.Store.DB.Exec(`DELETE FROM player_ratings`); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := svc.RepairRatings(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	got, _ := svc.Store.PlayerByID(ctx, a.ID)
-	if got.Deviation >= 350 {
-		t.Errorf("deviation not repaired: %.1f", got.Deviation)
-	}
-	if math.Abs(got.GoR-want.GoR) > 1e-6 {
-		t.Errorf("rating not reproduced: %.4f, want %.4f", got.GoR, want.GoR)
-	}
-	if cr, err := svc.Store.CategoryRating(ctx, a.ID, "9x9"); err != nil {
-		t.Errorf("per-board grid not rebuilt: %v", err)
-	} else if cr.Games != 6 {
-		t.Errorf("9x9 games = %d, want 6", cr.Games)
-	}
-
-	// Flag set → a second call is a no-op.
-	if v, _ := svc.Store.MetaGet(ctx, ratingsRepairedFlag); v != "1" {
-		t.Errorf("repaired flag not set: %q", v)
-	}
-	if err := svc.RepairRatings(ctx); err != nil {
-		t.Errorf("second RepairRatings should be a no-op: %v", err)
-	}
-}
-
 func TestRecordGameRejectsSamePlayer(t *testing.T) {
 	svc := newSvc(t)
 	ctx := context.Background()
