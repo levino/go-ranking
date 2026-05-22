@@ -224,6 +224,50 @@ func (s *Service) RecomputeGroup(ctx context.Context, groupID int64) error {
 	return s.Store.SaveRecompute(ctx, groupID, outPlayers, outCats, games)
 }
 
+// ratingsRepairedFlag marks that the one-time v3 rating repair has run.
+const ratingsRepairedFlag = "ratings_repaired"
+
+// RepairRatings is a one-time fix-up that runs at startup. The v3 schema
+// migration only rescaled the legacy GoR numbers to the OGS scale — it
+// did not replay history, which left every player at deviation 350
+// (huge ± in the UI) and the per-board ratings grid empty. RepairRatings
+// reseeds each player from the rating recorded before their first game
+// and replays the full history through the engine, so deviations,
+// per-board ratings and game snapshots all become correct.
+//
+// Guarded by a meta flag, so it runs exactly once. Deterministic and
+// idempotent — safe to re-run if interrupted.
+func (s *Service) RepairRatings(ctx context.Context) error {
+	if v, _ := s.Store.MetaGet(ctx, ratingsRepairedFlag); v == "1" {
+		return nil
+	}
+	groups, err := s.Store.ListGroups(ctx)
+	if err != nil {
+		return err
+	}
+	for _, g := range groups {
+		players, err := s.Store.ListPlayers(ctx, g.ID, true)
+		if err != nil {
+			return err
+		}
+		for _, p := range players {
+			before, ok, err := s.Store.EarliestGameRatingBefore(ctx, p.ID)
+			if err != nil {
+				return err
+			}
+			if ok {
+				if err := s.Store.SetSeedRating(ctx, p.ID, before); err != nil {
+					return err
+				}
+			}
+		}
+		if err := s.RecomputeGroup(ctx, g.ID); err != nil {
+			return err
+		}
+	}
+	return s.Store.MetaSet(ctx, ratingsRepairedFlag, "1")
+}
+
 // DefaultKomi exposes the conventional komi for a given handicap so
 // templates can pre-fill the komi field.
 func (s *Service) DefaultKomi(stones int) float64 { return defaultKomi(stones) }
