@@ -608,6 +608,21 @@ func (s *Store) ListGamesByPlayer(ctx context.Context, playerID int64) ([]Game, 
 		playerID, playerID)
 }
 
+// GameByID fetches a single game by its primary key.
+func (s *Store) GameByID(ctx context.Context, id int64) (*Game, error) {
+	games, err := s.queryGames(ctx,
+		`SELECT id,group_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
+		        black_gor_before,white_gor_before,black_gor_after,white_gor_after,played_at
+		   FROM games WHERE id=?`, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(games) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return &games[0], nil
+}
+
 func (s *Store) queryGames(ctx context.Context, q string, args ...any) ([]Game, error) {
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {

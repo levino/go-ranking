@@ -1,0 +1,115 @@
+{{define "content"}}
+<style>
+.done-shell {
+  background: var(--paper-2);
+  border: 2px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow-2);
+  padding: 2.2rem 1.8rem;
+  text-align: center;
+}
+.done-shell h1 { font-size: 2.4rem; margin-bottom: .2rem; }
+.done-shell .sub { color: var(--muted); margin-bottom: 1.8rem; font-size: 1.15rem; }
+.done-winner {
+  display: inline-flex; gap: .5rem; align-items: center;
+  background: #fbf7e8; border: 1px solid #e9ddb1; border-radius: 999px;
+  padding: .4rem 1rem; font-weight: 700; margin-bottom: 1.8rem;
+}
+.done-winner .stone {
+  width: 24px; height: 24px; border-radius: 50%;
+}
+.done-winner.black .stone { background: radial-gradient(circle at 30% 28%, #4b5563 0%, #000 70%); }
+.done-winner.white .stone { background: radial-gradient(circle at 30% 28%, #ffffff 0%, #e8dfb8 80%); border: 1.5px solid var(--ink); }
+
+.done-players {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.player-result {
+  background: #fbf7e8;
+  border: 1px solid #e9ddb1;
+  border-radius: 16px;
+  padding: 1.2rem 1rem;
+}
+.player-result .pname {
+  font-family: 'Fraunces', serif; font-weight: 800; font-size: 1.3rem;
+  margin-bottom: .5rem;
+}
+.player-result .delta {
+  font-family: 'Fraunces', serif; font-weight: 800; font-size: 1.8rem;
+  line-height: 1;
+}
+.player-result .delta.up   { color: var(--ok); }
+.player-result .delta.down { color: var(--accent); }
+.player-result .delta-label { font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.player-result .rankline { margin-top: .8rem; font-weight: 600; }
+.player-result .rankline.up   { color: var(--ok); }
+.player-result .rankline.down { color: var(--accent); }
+.player-result .rankgrade {
+  font-family: 'Fraunces', serif; font-weight: 800; font-size: 1.4rem;
+}
+
+.done-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .done-shell { padding: 1.4rem 1rem; border-radius: 16px; }
+  .done-shell h1 { font-size: 1.7rem; }
+  .done-players { gap: .6rem; }
+  .player-result { padding: .9rem .7rem; }
+  .player-result .pname { font-size: 1.1rem; }
+  .player-result .delta { font-size: 1.5rem; }
+  .done-cta { flex-direction: column; gap: .6rem; }
+  .done-cta .btn { width: 100%; }
+}
+</style>
+
+<nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · Eingetragen</nav>
+
+<div class="done-shell">
+  <h1>✅ Spiel eingetragen!</h1>
+  <p class="sub">{{.Result.BlackName}} vs. {{.Result.WhiteName}}</p>
+
+  {{if eq .Result.Winner "black"}}
+  <div class="done-winner black"><span class="stone"></span> {{.Result.BlackName}} hat gewonnen</div>
+  {{else}}
+  <div class="done-winner white"><span class="stone"></span> {{.Result.WhiteName}} hat gewonnen</div>
+  {{end}}
+
+  <div class="done-players">
+    {{/* --- Black --- */}}
+    <div class="player-result">
+      <div class="pname">⚫ {{.Result.BlackName}}</div>
+      <div class="delta-label">Punkte</div>
+      <div class="delta {{if gt .Result.BlackDelta 0.0}}up{{else}}down{{end}}">{{printf "%+.0f" .Result.BlackDelta}}</div>
+      {{if eq .Result.BlackRankChange 1}}
+      <div class="rankline up">🏅 Aufgestiegen auf <span class="rankgrade">{{.Result.BlackRankAfter}}</span></div>
+      {{else if eq .Result.BlackRankChange -1}}
+      <div class="rankline down">Abgestiegen auf <span class="rankgrade">{{.Result.BlackRankAfter}}</span></div>
+      {{else}}
+      <div class="rankline">Rang: <span class="rankgrade">{{.Result.BlackRankAfter}}</span> (gleich)</div>
+      {{end}}
+    </div>
+    {{/* --- White --- */}}
+    <div class="player-result">
+      <div class="pname">⚪ {{.Result.WhiteName}}</div>
+      <div class="delta-label">Punkte</div>
+      <div class="delta {{if gt .Result.WhiteDelta 0.0}}up{{else}}down{{end}}">{{printf "%+.0f" .Result.WhiteDelta}}</div>
+      {{if eq .Result.WhiteRankChange 1}}
+      <div class="rankline up">🏅 Aufgestiegen auf <span class="rankgrade">{{.Result.WhiteRankAfter}}</span></div>
+      {{else if eq .Result.WhiteRankChange -1}}
+      <div class="rankline down">Abgestiegen auf <span class="rankgrade">{{.Result.WhiteRankAfter}}</span></div>
+      {{else}}
+      <div class="rankline">Rang: <span class="rankgrade">{{.Result.WhiteRankAfter}}</span> (gleich)</div>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="done-cta">
+    <a class="btn huge success" href="/g/{{.Group.Slug}}">🏆 Zur Rangliste</a>
+    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play/g/p1">Noch ein Spiel eintragen</a>
+  </div>
+</div>
+{{end}}
+{{template "layout" .}}

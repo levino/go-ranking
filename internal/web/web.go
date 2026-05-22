@@ -124,7 +124,7 @@ func (s *Server) loadTemplates() error {
 	pages := []string{
 		"index", "dashboard", "players", "player", "admin", "docs",
 		"play_start", "play_pick_player", "play_pick_board",
-		"play_result", "play_record_finish", "play_confirm",
+		"play_result", "play_record_finish", "play_confirm", "play_done",
 	}
 	s.tmpls = map[string]*template.Template{}
 	for _, p := range pages {
@@ -174,6 +174,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /g/{slug}/play/g/finish", s.requireGroupAdmin(s.handleGameFinish))
 	mux.HandleFunc("POST /g/{slug}/play/g/confirm", s.requireGroupAdmin(s.handleGameConfirm))
 	mux.HandleFunc("POST /g/{slug}/play/g/commit", s.requireGroupAdmin(s.handleGameCommit))
+	mux.HandleFunc("GET /g/{slug}/play/g/done", s.requireGroupAdmin(s.handleGameDone))
 
 	// PWA manifest and icon (served at the origin root so iOS finds them
 	// without a per-group prefix). http.ServeMux's path patterns only
@@ -224,6 +225,9 @@ type pageContext struct {
 	// pageContext rather than WizardState so play_pick_board.html can
 	// call it without html/template seeing a dynamic query value.
 	NextBoard func(board int) string
+
+	// Result is the post-commit summary shown on the play-done page.
+	Result *GameResult
 }
 
 // WizardState carries the per-step navigation context for the play
@@ -324,6 +328,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	groups, err := s.Service.Store.ListAdminGroups(r.Context(), u.ID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
+		return
+	}
+	// A user who administers exactly one team has nothing to pick on
+	// the start page — send them straight into that team.
+	if len(groups) == 1 {
+		http.Redirect(w, r, "/g/"+groups[0].Slug, http.StatusFound)
 		return
 	}
 	s.render(w, "index", pageContext{Title: "Start", User: u, Groups: groups, MCPURL: s.mcpURL})
@@ -721,8 +731,9 @@ func (s *Server) handleGameConfirm(w http.ResponseWriter, r *http.Request, g *st
 	s.render(w, "play_confirm", ctx)
 }
 
-// handleGameCommit writes the game to the store and redirects to /play
-// with a flash message.
+// handleGameCommit writes the game to the store, then redirects (POST →
+// redirect → GET) to the result page so a browser refresh can't record
+// the game twice.
 func (s *Server) handleGameCommit(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), 400)
@@ -743,10 +754,67 @@ func (s *Server) handleGameCommit(w http.ResponseWriter, r *http.Request, g *sto
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	bp, _ := s.Service.Store.PlayerByID(r.Context(), gm.BlackPlayerID)
-	wp, _ := s.Service.Store.PlayerByID(r.Context(), gm.WhitePlayerID)
-	flash := fmt.Sprintf("%s vs %s — %s hat gewonnen.", bp.Name, wp.Name, winnerName(winner, bp, wp))
-	http.Redirect(w, r, "/g/"+g.Slug+"/play?flash="+url.QueryEscape(flash), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/g/%s/play/g/done?game=%d", g.Slug, gm.ID), http.StatusFound)
+}
+
+// GameResult is the post-commit summary shown on the result page: how
+// each player's rating moved and whether their displayed rank changed.
+type GameResult struct {
+	BlackName, WhiteName string
+	Winner               string  // "black" or "white"
+	BlackDelta           float64 // rating points gained (+) or lost (-)
+	WhiteDelta           float64
+	BlackRankAfter       string // new kyu/dan grade
+	WhiteRankAfter       string
+	BlackRankChange      int // +1 promoted, -1 demoted, 0 unchanged
+	WhiteRankChange      int
+}
+
+// rankChange reports whether a player's displayed rank moved up (+1),
+// down (-1) or stayed the same (0) between two ratings.
+func rankChange(before, after float64) int {
+	if rating.FormatRank(before) == rating.FormatRank(after) {
+		return 0
+	}
+	if after > before {
+		return 1
+	}
+	return -1
+}
+
+// handleGameDone renders the result page for a freshly recorded game:
+// points won/lost and any rank change for both players, plus a
+// prominent link to the league ranking.
+func (s *Server) handleGameDone(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	gameID, _ := parseInt64(r.URL.Query().Get("game"))
+	gm, err := s.Service.Store.GameByID(r.Context(), gameID)
+	if err != nil || gm.GroupID != g.ID {
+		http.NotFound(w, r)
+		return
+	}
+	bp, err := s.Service.Store.PlayerByID(r.Context(), gm.BlackPlayerID)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	wp, err := s.Service.Store.PlayerByID(r.Context(), gm.WhitePlayerID)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	ctx := s.basePlayContext(r, g, "Eingetragen!")
+	ctx.Result = &GameResult{
+		BlackName:       bp.Name,
+		WhiteName:       wp.Name,
+		Winner:          gm.Winner,
+		BlackDelta:      gm.BlackGoRAfter - gm.BlackGoRBefore,
+		WhiteDelta:      gm.WhiteGoRAfter - gm.WhiteGoRBefore,
+		BlackRankAfter:  rating.FormatRank(gm.BlackGoRAfter),
+		WhiteRankAfter:  rating.FormatRank(gm.WhiteGoRAfter),
+		BlackRankChange: rankChange(gm.BlackGoRBefore, gm.BlackGoRAfter),
+		WhiteRankChange: rankChange(gm.WhiteGoRBefore, gm.WhiteGoRAfter),
+	}
+	s.render(w, "play_done", ctx)
 }
 
 // handleDocs serves the embedded Markdown manual. The slug comes from
@@ -811,13 +879,6 @@ func filterPlayers(in []store.Player, exclude int64) []store.Player {
 		}
 	}
 	return out
-}
-
-func winnerName(winner string, b, w *store.Player) string {
-	if winner == "black" {
-		return b.Name
-	}
-	return w.Name
 }
 
 func parseInt64(s string) (int64, error) {
