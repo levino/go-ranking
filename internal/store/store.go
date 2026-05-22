@@ -653,51 +653,6 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-// ---- Meta (migration bookkeeping) ----------------------------------------
-
-// MetaGet returns the value for a meta key, or ErrNotFound if unset.
-func (s *Store) MetaGet(ctx context.Context, key string) (string, error) {
-	var v string
-	err := s.DB.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, key).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return v, err
-}
-
-// MetaSet stores a meta key/value.
-func (s *Store) MetaSet(ctx context.Context, key, value string) error {
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO meta(key,value) VALUES(?,?)
-		 ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
-	return err
-}
-
-// EarliestGameRatingBefore returns the player's overall rating snapshot
-// from before their first recorded game — the best estimate of their
-// starting strength. ok is false if the player has no games.
-func (s *Store) EarliestGameRatingBefore(ctx context.Context, playerID int64) (rating float64, ok bool, err error) {
-	err = s.DB.QueryRowContext(ctx,
-		`SELECT CASE WHEN black_player_id=? THEN black_gor_before ELSE white_gor_before END
-		   FROM games WHERE black_player_id=? OR white_player_id=?
-		  ORDER BY played_at, id LIMIT 1`,
-		playerID, playerID, playerID).Scan(&rating)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	return rating, true, nil
-}
-
-// SetSeedRating updates a player's seed (the strength a full history
-// recompute starts from).
-func (s *Store) SetSeedRating(ctx context.Context, playerID int64, seed float64) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE players SET seed_rating=? WHERE id=?`, seed, playerID)
-	return err
-}
-
 // ---- Users ---------------------------------------------------------------
 
 // UpsertUserByOIDC creates or updates a user identified by their OIDC
