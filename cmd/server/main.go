@@ -74,6 +74,9 @@ func run() error {
 	defer st.Close()
 
 	svc := service.New(st)
+	if err := svc.RepairRatings(context.Background()); err != nil {
+		return fmt.Errorf("repair ratings: %w", err)
+	}
 	signer := auth.NewSigner(key)
 
 	webSrv, err := web.New(svc, signer, oidcCfg)
