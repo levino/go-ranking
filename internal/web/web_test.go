@@ -4,16 +4,19 @@ import (
 	"context"
 	"encoding/hex"
 	"io"
+	"math"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/levino/go-ranking/internal/auth"
+	"github.com/levino/go-ranking/internal/rating"
 	"github.com/levino/go-ranking/internal/service"
 	"github.com/levino/go-ranking/internal/store"
 )
@@ -46,7 +49,7 @@ func loggedInClient(t *testing.T, ts *httptest.Server, signer *auth.Signer, user
 	t.Helper()
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{
-		Jar: jar,
+		Jar:           jar,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	rec := httptest.NewRecorder()
@@ -147,6 +150,35 @@ func TestDashboardRendersForAdmin(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "Pia") {
 		t.Errorf("Pia not in body")
+	}
+}
+
+func TestPlayerProfileShowsRatingGrid(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroupWithSlug(ctx, "g", "G")
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	_ = svc.Store.AddGroupAdmin(ctx, u.ID, g.ID)
+	pia, _ := svc.Store.CreatePlayer(ctx, g.ID, "Pia", 900)
+	tom, _ := svc.Store.CreatePlayer(ctx, g.ID, "Tom", 900)
+	if _, err := svc.RecordGame(ctx, g.ID, pia.ID, tom.ID, rating.Board9, 0, math.NaN(), true); err != nil {
+		t.Fatal(err)
+	}
+
+	c := loggedInClient(t, ts, signer, u.ID)
+	resp, err := c.Get(ts.URL + "/g/g/p/" + strconv.FormatInt(pia.ID, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("profile status %d: %s", resp.StatusCode, body)
+	}
+	for _, want := range []string{"Pia", "Bewertungen", "Gesamt", "9x9", "13x13", "19x19"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("profile page missing %q", want)
+		}
 	}
 }
 

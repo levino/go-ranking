@@ -22,15 +22,35 @@ CREATE TABLE IF NOT EXISTS group_admins (
 );
 CREATE INDEX IF NOT EXISTS idx_group_admins_group ON group_admins(group_id);
 
+-- A player carries the "overall" Glicko-2 rating (gor/deviation/
+-- volatility). seed_rating is the strength estimate the player started
+-- from — used to re-seed a full history recompute. Per-board-size
+-- ratings live in player_ratings.
 CREATE TABLE IF NOT EXISTS players (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     name        TEXT NOT NULL,
-    gor         REAL NOT NULL DEFAULT 100,
+    gor         REAL NOT NULL DEFAULT 1500,
+    deviation   REAL NOT NULL DEFAULT 350,
+    volatility  REAL NOT NULL DEFAULT 0.06,
+    seed_rating REAL NOT NULL DEFAULT 1500,
     active      INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_players_group ON players(group_id);
+
+-- The OGS "ratings grid": one Glicko-2 rating per board-size category.
+-- The overall rating is kept on the players row; this table holds the
+-- 9x9 / 13x13 / 19x19 categories.
+CREATE TABLE IF NOT EXISTS player_ratings (
+    player_id   INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    category    TEXT NOT NULL,
+    rating      REAL NOT NULL,
+    deviation   REAL NOT NULL,
+    volatility  REAL NOT NULL,
+    games       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (player_id, category)
+);
 
 CREATE TABLE IF NOT EXISTS oauth_clients (
     client_id     TEXT PRIMARY KEY,
@@ -50,6 +70,8 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_oauth_codes_expires ON oauth_codes(expires_at);
 
+-- black_gor_* / white_gor_* hold each player's overall Glicko-2 rating
+-- before and after the game (a per-game snapshot).
 CREATE TABLE IF NOT EXISTS games (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id         INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -68,8 +90,3 @@ CREATE TABLE IF NOT EXISTS games (
 CREATE INDEX IF NOT EXISTS idx_games_group ON games(group_id);
 CREATE INDEX IF NOT EXISTS idx_games_black ON games(black_player_id);
 CREATE INDEX IF NOT EXISTS idx_games_white ON games(white_player_id);
-
--- Migration: legacy `sessions` table is removed. If an older deployment
--- still has it, the table can be dropped manually — there is no live data
--- to preserve. The `games.session_id` column from the old schema is left
--- alone if present; new inserts use the new column list.

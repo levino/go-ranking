@@ -41,10 +41,117 @@ func Open(path string) (*Store, error) {
 	if err := s.migrate(context.Background()); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := s.migrateRatings(context.Background()); err != nil {
+		return nil, fmt.Errorf("migrate ratings: %w", err)
+	}
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
 	return s, nil
+}
+
+// migrateRatings handles the v2 → v3 transition: the single legacy
+// EGF-GoR number per player is replaced by an OGS Glicko-2 triple
+// (rating/deviation/volatility) plus a seed, and the per-board ratings
+// grid (player_ratings) is added. Legacy GoR values are converted to
+// the OGS rating scale. Runs before schema.sql; a no-op on a fresh DB
+// (no players table yet) or once already migrated. Idempotent.
+func (s *Store) migrateRatings(ctx context.Context) error {
+	var playersExists, hasDeviation bool
+	rows, err := s.DB.QueryContext(ctx, "PRAGMA table_info(players)")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		playersExists = true
+		if name == "deviation" {
+			hasDeviation = true
+		}
+	}
+	rows.Close()
+	if !playersExists || hasDeviation {
+		return nil
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`ALTER TABLE players ADD COLUMN deviation REAL NOT NULL DEFAULT 350`,
+		`ALTER TABLE players ADD COLUMN volatility REAL NOT NULL DEFAULT 0.06`,
+		`ALTER TABLE players ADD COLUMN seed_rating REAL NOT NULL DEFAULT 1500`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+
+	// Convert legacy EGF-GoR player ratings to the OGS scale.
+	type idVal struct {
+		id  int64
+		gor float64
+	}
+	var players []idVal
+	prows, err := tx.QueryContext(ctx, `SELECT id, gor FROM players`)
+	if err != nil {
+		return err
+	}
+	for prows.Next() {
+		var p idVal
+		if err := prows.Scan(&p.id, &p.gor); err != nil {
+			prows.Close()
+			return err
+		}
+		players = append(players, p)
+	}
+	prows.Close()
+	for _, p := range players {
+		nr := rating.RatingFromLegacyGoR(p.gor)
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE players SET gor=?, seed_rating=?, deviation=350, volatility=0.06 WHERE id=?`,
+			nr, nr, p.id); err != nil {
+			return err
+		}
+	}
+
+	// Convert legacy game-snapshot columns to the OGS scale.
+	type gameSnap struct {
+		id                               int64
+		bBefore, wBefore, bAfter, wAfter float64
+	}
+	var games []gameSnap
+	grows, err := tx.QueryContext(ctx,
+		`SELECT id, black_gor_before, white_gor_before, black_gor_after, white_gor_after FROM games`)
+	if err != nil {
+		return err
+	}
+	for grows.Next() {
+		var g gameSnap
+		if err := grows.Scan(&g.id, &g.bBefore, &g.wBefore, &g.bAfter, &g.wAfter); err != nil {
+			grows.Close()
+			return err
+		}
+		games = append(games, g)
+	}
+	grows.Close()
+	conv := rating.RatingFromLegacyGoR
+	for _, g := range games {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE games SET black_gor_before=?, white_gor_before=?, black_gor_after=?, white_gor_after=? WHERE id=?`,
+			conv(g.bBefore), conv(g.wBefore), conv(g.bAfter), conv(g.wAfter), g.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // migrate handles the v1 → v2 transition: drops the legacy `sessions`
@@ -142,12 +249,35 @@ type Group struct {
 	CreatedAt time.Time
 }
 
+// Player carries the "overall" Glicko-2 rating. GoR holds the overall
+// rating value (the field name is kept for storage continuity);
+// Deviation and Volatility are the other two Glicko-2 parameters.
+// SeedRating is the strength the player was created at.
 type Player struct {
-	ID      int64
-	GroupID int64
-	Name    string
-	GoR     float64
-	Active  bool
+	ID         int64
+	GroupID    int64
+	Name       string
+	GoR        float64
+	Deviation  float64
+	Volatility float64
+	SeedRating float64
+	Active     bool
+}
+
+// RatingState is a Glicko-2 triple with a game counter.
+type RatingState struct {
+	Rating     float64
+	Deviation  float64
+	Volatility float64
+	Games      int
+}
+
+// CategoryRating is a player's Glicko-2 rating in one board-size
+// category ("9x9", "13x13", "19x19").
+type CategoryRating struct {
+	PlayerID int64
+	Category string
+	RatingState
 }
 
 type Game struct {
@@ -238,14 +368,35 @@ func (s *Store) ListGroups(ctx context.Context) ([]Group, error) {
 
 // ---- Players -------------------------------------------------------------
 
-func (s *Store) CreatePlayer(ctx context.Context, groupID int64, name string, gor float64) (*Player, error) {
+// CreatePlayer adds a player seeded at the given rating (the trainer's
+// strength estimate). Deviation and volatility start at the Glicko-2
+// defaults.
+func (s *Store) CreatePlayer(ctx context.Context, groupID int64, name string, seed float64) (*Player, error) {
 	res, err := s.DB.ExecContext(ctx,
-		`INSERT INTO players(group_id,name,gor) VALUES(?,?,?)`, groupID, name, gor)
+		`INSERT INTO players(group_id,name,gor,deviation,volatility,seed_rating) VALUES(?,?,?,?,?,?)`,
+		groupID, name, seed, rating.DefaultDeviation, rating.DefaultVolatility, seed)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
-	return &Player{ID: id, GroupID: groupID, Name: name, GoR: gor, Active: true}, nil
+	return &Player{
+		ID: id, GroupID: groupID, Name: name, GoR: seed,
+		Deviation: rating.DefaultDeviation, Volatility: rating.DefaultVolatility,
+		SeedRating: seed, Active: true,
+	}, nil
+}
+
+const playerCols = `id,group_id,name,gor,deviation,volatility,seed_rating,active`
+
+func scanPlayer(sc interface{ Scan(...any) error }) (*Player, error) {
+	p := &Player{}
+	var act int
+	if err := sc.Scan(&p.ID, &p.GroupID, &p.Name, &p.GoR, &p.Deviation,
+		&p.Volatility, &p.SeedRating, &act); err != nil {
+		return nil, err
+	}
+	p.Active = act != 0
+	return p, nil
 }
 
 func (s *Store) UpdatePlayer(ctx context.Context, id int64, name string, active bool) error {
@@ -258,40 +409,26 @@ func (s *Store) UpdatePlayer(ctx context.Context, id int64, name string, active 
 // Used by the MCP add_player/update_player tools so callers can identify
 // players without having to remember numeric IDs.
 func (s *Store) PlayerByGroupAndName(ctx context.Context, groupID int64, name string) (*Player, error) {
-	p := &Player{}
-	var act int
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,group_id,name,gor,active FROM players WHERE group_id=? AND name=?`,
-		groupID, name).
-		Scan(&p.ID, &p.GroupID, &p.Name, &p.GoR, &act)
+	row := s.DB.QueryRowContext(ctx,
+		`SELECT `+playerCols+` FROM players WHERE group_id=? AND name=?`, groupID, name)
+	p, err := scanPlayer(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	p.Active = act != 0
-	return p, nil
+	return p, err
 }
 
 func (s *Store) PlayerByID(ctx context.Context, id int64) (*Player, error) {
-	p := &Player{}
-	var act int
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,group_id,name,gor,active FROM players WHERE id=?`, id).
-		Scan(&p.ID, &p.GroupID, &p.Name, &p.GoR, &act)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+playerCols+` FROM players WHERE id=?`, id)
+	p, err := scanPlayer(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	p.Active = act != 0
-	return p, nil
+	return p, err
 }
 
 func (s *Store) ListPlayers(ctx context.Context, groupID int64, includeInactive bool) ([]Player, error) {
-	q := `SELECT id,group_id,name,gor,active FROM players WHERE group_id=?`
+	q := `SELECT ` + playerCols + ` FROM players WHERE group_id=?`
 	if !includeInactive {
 		q += ` AND active=1`
 	}
@@ -303,23 +440,58 @@ func (s *Store) ListPlayers(ctx context.Context, groupID int64, includeInactive 
 	defer rows.Close()
 	var out []Player
 	for rows.Next() {
-		var p Player
-		var act int
-		if err := rows.Scan(&p.ID, &p.GroupID, &p.Name, &p.GoR, &act); err != nil {
+		p, err := scanPlayer(rows)
+		if err != nil {
 			return nil, err
 		}
-		p.Active = act != 0
-		out = append(out, p)
+		out = append(out, *p)
+	}
+	return out, rows.Err()
+}
+
+// ---- Per-board ratings grid ----------------------------------------------
+
+// CategoryRating returns a player's rating in one category. If the
+// player has no games in that category yet, returns ErrNotFound.
+func (s *Store) CategoryRating(ctx context.Context, playerID int64, category string) (CategoryRating, error) {
+	cr := CategoryRating{PlayerID: playerID, Category: category}
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT rating,deviation,volatility,games FROM player_ratings WHERE player_id=? AND category=?`,
+		playerID, category).
+		Scan(&cr.Rating, &cr.Deviation, &cr.Volatility, &cr.Games)
+	if errors.Is(err, sql.ErrNoRows) {
+		return cr, ErrNotFound
+	}
+	return cr, err
+}
+
+// ListCategoryRatings returns all per-board ratings for a player.
+func (s *Store) ListCategoryRatings(ctx context.Context, playerID int64) ([]CategoryRating, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT category,rating,deviation,volatility,games FROM player_ratings WHERE player_id=?`,
+		playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CategoryRating
+	for rows.Next() {
+		cr := CategoryRating{PlayerID: playerID}
+		if err := rows.Scan(&cr.Category, &cr.Rating, &cr.Deviation, &cr.Volatility, &cr.Games); err != nil {
+			return nil, err
+		}
+		out = append(out, cr)
 	}
 	return out, rows.Err()
 }
 
 // ---- Games ---------------------------------------------------------------
 
-// RecordGame inserts a new game and updates both players' GoR atomically.
-// The caller is expected to have computed the after-GoRs already from the
-// before-GoRs and the handicap bonus (see service.RecordGame).
-func (s *Store) RecordGame(ctx context.Context, g Game) (*Game, error) {
+// RecordGame inserts a game and updates both players' ratings
+// atomically: the overall rating on the players row, and the board-size
+// category rating in player_ratings. The caller (service.RecordGame)
+// has already computed all new values.
+func (s *Store) RecordGame(ctx context.Context, g Game, bOverall, wOverall RatingState, bCat, wCat CategoryRating) (*Game, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -334,10 +506,16 @@ func (s *Store) RecordGame(ctx context.Context, g Game) (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE players SET gor=? WHERE id=?`, g.BlackGoRAfter, g.BlackPlayerID); err != nil {
+	if err := updatePlayerOverall(ctx, tx, g.BlackPlayerID, bOverall); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE players SET gor=? WHERE id=?`, g.WhiteGoRAfter, g.WhitePlayerID); err != nil {
+	if err := updatePlayerOverall(ctx, tx, g.WhitePlayerID, wOverall); err != nil {
+		return nil, err
+	}
+	if err := upsertCategory(ctx, tx, g.BlackPlayerID, bCat); err != nil {
+		return nil, err
+	}
+	if err := upsertCategory(ctx, tx, g.WhitePlayerID, wCat); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -347,6 +525,72 @@ func (s *Store) RecordGame(ctx context.Context, g Game) (*Game, error) {
 	g.ID = id
 	g.PlayedAt = time.Now()
 	return &g, nil
+}
+
+type execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func updatePlayerOverall(ctx context.Context, e execer, playerID int64, r RatingState) error {
+	_, err := e.ExecContext(ctx,
+		`UPDATE players SET gor=?, deviation=?, volatility=? WHERE id=?`,
+		r.Rating, r.Deviation, r.Volatility, playerID)
+	return err
+}
+
+func upsertCategory(ctx context.Context, e execer, playerID int64, cr CategoryRating) error {
+	_, err := e.ExecContext(ctx,
+		`INSERT INTO player_ratings(player_id,category,rating,deviation,volatility,games)
+		 VALUES(?,?,?,?,?,?)
+		 ON CONFLICT(player_id,category) DO UPDATE SET
+		   rating=excluded.rating, deviation=excluded.deviation,
+		   volatility=excluded.volatility, games=excluded.games`,
+		playerID, cr.Category, cr.Rating, cr.Deviation, cr.Volatility, cr.Games)
+	return err
+}
+
+// ListGamesByGroupAsc returns every game of a group, oldest first —
+// the chronological order a full ratings recompute replays.
+func (s *Store) ListGamesByGroupAsc(ctx context.Context, groupID int64) ([]Game, error) {
+	return s.queryGames(ctx,
+		`SELECT id,group_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
+		        black_gor_before,white_gor_before,black_gor_after,white_gor_after,played_at
+		   FROM games WHERE group_id=? ORDER BY played_at, id`, groupID)
+}
+
+// SaveRecompute persists a full ratings recompute for a group in one
+// transaction: every player's overall rating, the whole player_ratings
+// grid (rebuilt from scratch), and every game's snapshot columns.
+func (s *Store) SaveRecompute(ctx context.Context, groupID int64, players []Player, cats []CategoryRating, games []Game) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, p := range players {
+		if err := updatePlayerOverall(ctx, tx, p.ID,
+			RatingState{Rating: p.GoR, Deviation: p.Deviation, Volatility: p.Volatility}); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM player_ratings WHERE player_id IN (SELECT id FROM players WHERE group_id=?)`,
+		groupID); err != nil {
+		return err
+	}
+	for _, cr := range cats {
+		if err := upsertCategory(ctx, tx, cr.PlayerID, cr); err != nil {
+			return err
+		}
+	}
+	for _, g := range games {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE games SET black_gor_before=?, white_gor_before=?, black_gor_after=?, white_gor_after=? WHERE id=?`,
+			g.BlackGoRBefore, g.WhiteGoRBefore, g.BlackGoRAfter, g.WhiteGoRAfter, g.ID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ListRecentGames(ctx context.Context, groupID int64, limit int) ([]Game, error) {

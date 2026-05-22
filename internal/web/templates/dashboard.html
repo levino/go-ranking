@@ -9,18 +9,28 @@
   margin-bottom: .8rem;
 }
 .dash-title h1 { margin: 0; }
+.dash-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 @media (max-width: 640px) {
   .dash-title { gap: .6rem; }
   .dash-title .btn { width: 100%; }
+  .dash-actions { width: 100%; }
+  .dash-actions .btn, .dash-actions form { flex: 1; }
+  .dash-actions .btn { width: 100%; }
   .row { gap: .6rem; }
   .kpi { padding: .7rem .9rem; }
   .kpi .v { font-size: 1.6rem; }
 }
+.btn-secondary { background: #6b7280; }
 </style>
 <nav class="breadcrumb"><a href="/">Start</a> · {{.Group.Name}}</nav>
 <div class="dash-title">
   <h1>{{.Group.Name}}</h1>
-  <a class="btn" href="/g/{{.Group.Slug}}/play">Spielen</a>
+  <div class="dash-actions">
+    <form method="post" action="/g/{{.Group.Slug}}/recompute" onsubmit="return confirm('Alle Bewertungen aus der Partie-Historie neu berechnen?');">
+      <button class="btn btn-secondary" type="submit">Bewertungen neu berechnen</button>
+    </form>
+    <a class="btn" href="/g/{{.Group.Slug}}/play">Spielen</a>
+  </div>
 </div>
 
 <div class="row">
@@ -32,13 +42,12 @@
 {{if .Players}}
 <div class="table-scroll">
 <table>
-<tr><th>#</th><th>Name</th><th>GoR</th><th>Rang</th><th>Status</th></tr>
+<tr><th>#</th><th>Name</th><th>Spielstärke</th><th>Status</th></tr>
 {{range $i, $p := .Players}}
 <tr>
   <td>{{add $i 1}}</td>
-  <td>{{$p.Name}}</td>
-  <td>{{printf "%.0f" $p.GoR}}</td>
-  <td>{{rank $p.GoR}}</td>
+  <td><a href="/g/{{$.Group.Slug}}/p/{{$p.ID}}">{{$p.Name}}</a></td>
+  <td>{{rankFull $p.GoR $p.Deviation}}</td>
   <td>{{if $p.Active}}aktiv{{else}}inaktiv{{end}}</td>
 </tr>
 {{end}}
@@ -60,8 +69,8 @@
   <td>{{.Handicap}}</td>
   <td>{{printf "%.1f" .Komi}}</td>
   <td>{{.Winner}}</td>
-  <td>{{printf "%+.1f" (sub .BlackGoRAfter .BlackGoRBefore)}}</td>
-  <td>{{printf "%+.1f" (sub .WhiteGoRAfter .WhiteGoRBefore)}}</td>
+  <td>{{printf "%+.0f" (sub .BlackGoRAfter .BlackGoRBefore)}}</td>
+  <td>{{printf "%+.0f" (sub .WhiteGoRAfter .WhiteGoRBefore)}}</td>
 </tr>
 {{end}}
 </table>

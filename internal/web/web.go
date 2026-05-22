@@ -69,6 +69,12 @@ func (s *Server) loadTemplates() error {
 		"add":  func(a, b int) int { return a + b },
 		"sub":  func(a, b float64) float64 { return a - b },
 		"rank": rating.FormatRank,
+		// rankFull renders a rating as the OGS profile does it, e.g.
+		// "11.0k ± 1.5" — a fractional grade plus a rank-space ±.
+		"rankFull": func(r, d float64) string {
+			return fmt.Sprintf("%s ± %.1f",
+				rating.FormatRankPrecise(r), rating.RankUncertainty(r, d))
+		},
 		"playerName": func(m map[int64]string, id int64) string {
 			if n, ok := m[id]; ok {
 				return n
@@ -116,7 +122,7 @@ func (s *Server) loadTemplates() error {
 		},
 	}
 	pages := []string{
-		"index", "dashboard", "players", "admin", "docs",
+		"index", "dashboard", "players", "player", "admin", "docs",
 		"play_start", "play_pick_player", "play_pick_board",
 		"play_result", "play_record_finish", "play_confirm",
 	}
@@ -147,6 +153,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /g/{slug}", s.requireGroupAdmin(s.handleDashboard))
 	mux.HandleFunc("GET /g/{slug}/admins", s.requireGroupAdmin(s.handleAdminsGET))
 	mux.HandleFunc("GET /g/{slug}/players", s.requireGroupAdmin(s.handlePlayersGET))
+	mux.HandleFunc("GET /g/{slug}/p/{id}", s.requireGroupAdmin(s.handlePlayerProfile))
+	mux.HandleFunc("POST /g/{slug}/recompute", s.requireGroupAdmin(s.handleRecompute))
 
 	// Tablet UI — a multi-step wizard the kids tap through.
 	// /play landing has two entry buttons: Vorgabe-Rechner & Spiel-Eintrag.
@@ -196,6 +204,11 @@ type pageContext struct {
 	RecentGames []store.Game
 	PlayerNames map[int64]string
 	GameCount   int
+
+	// Player-profile extras.
+	Player       *store.Player
+	RatingRows   []RatingRow
+	ProfileGames []store.Game
 
 	// Docs page extras.
 	DocsList   []docs.Page
@@ -453,6 +466,71 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *stor
 func (s *Server) handlePlayersGET(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	players, _ := s.Service.Store.ListPlayers(r.Context(), g.ID, true)
 	s.render(w, "players", pageContext{Title: "Spieler", User: userOf(r), Group: g, Players: players})
+}
+
+// RatingRow is one line of the player profile's ratings grid.
+type RatingRow struct {
+	Label     string
+	Rating    float64
+	Deviation float64
+	Games     int
+	Active    bool // false → the player has no games in this category
+}
+
+// handlePlayerProfile renders the OGS-style ratings grid for one
+// player: the overall rating plus one row per board size.
+func (s *Server) handlePlayerProfile(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	id, _ := parseInt64(r.PathValue("id"))
+	p, err := s.Service.Store.PlayerByID(r.Context(), id)
+	if err != nil || p.GroupID != g.ID {
+		http.NotFound(w, r)
+		return
+	}
+	cats, _ := s.Service.Store.ListCategoryRatings(r.Context(), p.ID)
+	games, _ := s.Service.Store.ListGamesByPlayer(r.Context(), p.ID)
+	players, _ := s.Service.Store.ListPlayers(r.Context(), g.ID, true)
+	pn := map[int64]string{}
+	for _, pl := range players {
+		pn[pl.ID] = pl.Name
+	}
+
+	catMap := map[string]store.CategoryRating{}
+	for _, c := range cats {
+		catMap[c.Category] = c
+	}
+	rows := []RatingRow{{
+		Label: "Gesamt", Rating: p.GoR, Deviation: p.Deviation,
+		Games: len(games), Active: len(games) > 0,
+	}}
+	for _, bs := range []rating.BoardSize{rating.Board9, rating.Board13, rating.Board19} {
+		label := bs.String()
+		if c, ok := catMap[label]; ok {
+			rows = append(rows, RatingRow{label, c.Rating, c.Deviation, c.Games, true})
+		} else {
+			rows = append(rows, RatingRow{Label: label})
+		}
+	}
+
+	// Games come back oldest-first; show newest-first.
+	rev := make([]store.Game, len(games))
+	for i, gm := range games {
+		rev[len(games)-1-i] = gm
+	}
+
+	s.render(w, "player", pageContext{
+		Title: p.Name, User: userOf(r), Group: g,
+		Player: p, RatingRows: rows, ProfileGames: rev, PlayerNames: pn,
+	})
+}
+
+// handleRecompute replays the group's full game history through the
+// rating engine, rebuilding every rating from the players' seeds.
+func (s *Server) handleRecompute(w http.ResponseWriter, r *http.Request, g *store.Group) {
+	if err := s.Service.RecomputeGroup(r.Context(), g.ID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	http.Redirect(w, r, "/g/"+g.Slug, http.StatusFound)
 }
 
 // handlePlayStart is the landing page: two big entry buttons.
@@ -839,4 +917,3 @@ func drawStoneIcon(size int) image.Image {
 	}
 	return img
 }
-

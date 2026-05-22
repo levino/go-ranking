@@ -5,12 +5,11 @@
 {{if .Players}}
 <div class="table-scroll">
 <table>
-<tr><th>Name</th><th>GoR</th><th>Rang</th><th>Status</th></tr>
+<tr><th>Name</th><th>Spielstärke</th><th>Status</th></tr>
 {{range .Players}}
 <tr>
-  <td>{{.Name}}</td>
-  <td>{{printf "%.0f" .GoR}}</td>
-  <td>{{rank .GoR}}</td>
+  <td><a href="/g/{{$.Group.Slug}}/p/{{.ID}}">{{.Name}}</a></td>
+  <td>{{rankFull .GoR .Deviation}}</td>
   <td>{{if .Active}}aktiv{{else}}inaktiv{{end}}</td>
 </tr>
 {{end}}

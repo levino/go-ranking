@@ -54,7 +54,7 @@ func toolDefs() []Tool {
 		},
 		{
 			Name:        "add_player",
-			Description: "Fügt einen Spieler (nur Name, kein Account) zu einer Gruppe hinzu. Der Rang ist eine grobe Schätzung der Trainerin (z.B. '20k' für Anfänger) und wird in einen GoR-Startwert übersetzt.",
+			Description: "Fügt einen Spieler (nur Name, kein Account) zu einer Gruppe hinzu. Der Rang ist eine grobe Schätzung der Trainerin (z.B. '20k' für Anfänger) und wird in einen Startwert übersetzt.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -81,7 +81,7 @@ func toolDefs() []Tool {
 		},
 		{
 			Name:        "list_players",
-			Description: "Aktuelle Spielerliste einer Gruppe mit GoR und Rang.",
+			Description: "Aktuelle Spielerliste einer Gruppe mit Rating und Rang.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -92,7 +92,7 @@ func toolDefs() []Tool {
 		},
 		{
 			Name:        "ranking",
-			Description: "Sortierte Rangliste einer Gruppe (höchster GoR zuerst).",
+			Description: "Sortierte Rangliste einer Gruppe (höchstes Rating zuerst).",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -117,7 +117,7 @@ func toolDefs() []Tool {
 		},
 		{
 			Name:        "record_game",
-			Description: "Trägt eine Partie ein. Vorgabe (Steine) muss übergeben werden. Komi optional — wenn nicht angegeben, EGF-Standard (6.5 ohne Vorgabe, sonst 0.5). Negatives Komi (Rückkomi) ist erlaubt, vor allem auf 9x9 sinnvoll. Beide Spieler-Namen müssen in der Gruppe existieren.",
+			Description: "Trägt eine Partie ein. Vorgabe (Steine) muss übergeben werden. Komi optional — wenn nicht angegeben, Standard (6,5 ohne Vorgabe, sonst 0,5). Negatives Komi (Rückkomi) ist erlaubt, vor allem auf 9x9 sinnvoll. Beide Spieler-Namen müssen in der Gruppe existieren.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -253,20 +253,20 @@ func (s *Server) toolAddPlayer(ctx context.Context, args map[string]any) (*ToolC
 	if name == "" {
 		return errorResult("name required"), nil
 	}
-	gor := 100.0
+	seed, _ := rating.FromRank("30k")
 	if rk, _ := args["rank"].(string); rk != "" {
 		v, err := rating.FromRank(rk)
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}
-		gor = v
+		seed = v
 	}
-	p, err := s.Service.Store.CreatePlayer(ctx, g.ID, name, gor)
+	p, err := s.Service.Store.CreatePlayer(ctx, g.ID, name, seed)
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
-	return textResult(fmt.Sprintf("Spieler %q angelegt (GoR %.0f, %s) in %s.",
-		p.Name, p.GoR, rating.FormatRank(p.GoR), g.Slug)), nil
+	return textResult(fmt.Sprintf("Spieler %q angelegt (Rang %s) in %s.",
+		p.Name, rating.FormatRank(p.GoR), g.Slug)), nil
 }
 
 func (s *Server) toolUpdatePlayer(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
@@ -316,7 +316,7 @@ func (s *Server) toolListPlayers(ctx context.Context, args map[string]any) (*Too
 		if !p.Active {
 			status = " [inaktiv]"
 		}
-		fmt.Fprintf(&b, "  %-25s GoR %4.0f  (%s)%s\n", p.Name, p.GoR, rating.FormatRank(p.GoR), status)
+		fmt.Fprintf(&b, "  %-25s Rating %5.0f  (%s)%s\n", p.Name, p.GoR, rating.FormatRank(p.GoR), status)
 	}
 	return textResult(b.String()), nil
 }
@@ -412,7 +412,7 @@ func (s *Server) toolRecordGame(ctx context.Context, args map[string]any) (*Tool
 	}
 	return textResult(fmt.Sprintf(
 		"Eingetragen: %s (Schwarz) vs %s (Weiß) auf %s, Vorgabe %d, Komi %.1f, Sieger: %s.\n"+
-			"GoR: %s %.0f → %.0f (%+.1f), %s %.0f → %.0f (%+.1f).",
+			"Rating: %s %.0f → %.0f (%+.1f), %s %.0f → %.0f (%+.1f).",
 		bp.Name, wp.Name, board, gm.Handicap, gm.Komi, gm.Winner,
 		bp.Name, gm.BlackGoRBefore, gm.BlackGoRAfter, gm.BlackGoRAfter-gm.BlackGoRBefore,
 		wp.Name, gm.WhiteGoRBefore, gm.WhiteGoRAfter, gm.WhiteGoRAfter-gm.WhiteGoRBefore)), nil
