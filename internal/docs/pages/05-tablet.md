@@ -19,13 +19,14 @@ Unter den beiden Karten erscheint eine kleine Liste der zuletzt gespielten Parti
 
 Danach kommt die Ergebnis­seite mit den großen Stein-Symbolen, wer Schwarz und wer Weiß spielt, und der Empfehlung in groß. **"Alles klar"** schließt den Wizard.
 
-## Spiel eintragen (4 Schritte + Bestätigung)
+## Spiel eintragen (4 Schritte + Bestätigung + Ergebnis)
 
 1. Spieler 1
 2. Spieler 2
 3. Brett
 4. **Anpassen + Sieger.** Vorgabe und Komi sind mit der Empfehlung vor­ausgefüllt. ±-Buttons (große Touch-Flächen) verändern die Werte schritt­weise. Komi darf negativ sein — der Hinweis am unteren Rand erinnert daran. Dann tippt eines der Kinder den großen **"Schwarz gewinnt"**- oder **"Weiß gewinnt"**-Knopf.
-5. **Bestätigen.** Eine eigene Seite zeigt nochmal in groß: Schwarz, Weiß, Brett, Vorgabe, Komi, Sieger. **"Ja, eintragen"** schreibt die Partie in die Datenbank und führt zurück zur Start­seite. **"Abbrechen"** verwirft.
+5. **Bestätigen.** Eine eigene Seite zeigt nochmal in groß: Schwarz, Weiß, Brett, Vorgabe, Komi, Sieger. **"Ja, eintragen"** schreibt die Partie in die Datenbank. **"Abbrechen"** verwirft.
+6. **Ergebnis.** Eine Ergebnisseite zeigt, wie viele Punkte beide Spieler gewonnen oder verloren haben und ob ihr Rang sich geändert hat. Von dort führt ein großer Knopf direkt zur **Rangliste** — oder gleich zum nächsten Spieleintrag.
 
 ## Neuer Spieler in der AG?
 
