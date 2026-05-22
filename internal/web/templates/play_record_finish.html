@@ -147,11 +147,16 @@
   color: var(--muted);
   margin-top: .4rem;
 }
+
+.swap-btn {
+  display: flex;
+  margin: -.2rem auto 0;
+}
 </style>
 
 <form method="post" action="/g/{{.Group.Slug}}/play/g/confirm" id="finish-form">
-  <input type="hidden" name="black" value="{{.Recommendation.BlackPlayer.ID}}">
-  <input type="hidden" name="white" value="{{.Recommendation.WhitePlayer.ID}}">
+  <input type="hidden" name="black" id="f-black" value="{{.Recommendation.BlackPlayer.ID}}">
+  <input type="hidden" name="white" id="f-white" value="{{.Recommendation.WhitePlayer.ID}}">
   <input type="hidden" name="board" value="{{.Recommendation.Board}}">
 
   <div class="wizard-shell">
@@ -165,17 +170,18 @@
         <div class="stone">⬤</div>
         <div>
           <div class="muted" style="font-size:.8rem;letter-spacing:.1em">SCHWARZ</div>
-          <div class="name">{{.Recommendation.BlackPlayer.Name}}</div>
+          <div class="name" id="name-black">{{.Recommendation.BlackPlayer.Name}}</div>
         </div>
       </div>
       <div class="finish-side white">
         <div class="stone">○</div>
         <div>
           <div class="muted" style="font-size:.8rem;letter-spacing:.1em">WEISS</div>
-          <div class="name">{{.Recommendation.WhitePlayer.Name}}</div>
+          <div class="name" id="name-white">{{.Recommendation.WhitePlayer.Name}}</div>
         </div>
       </div>
     </div>
+    <button type="button" class="btn ghost swap-btn" onclick="swapColors()">⇄ Farben tauschen</button>
 
     <div class="handicap-tuner">
       <h3>So gespielt</h3>
@@ -190,12 +196,12 @@
       <div class="tune-row">
         <div class="tune-label">Komi</div>
         <div class="tune-controls">
-          <button type="button" class="tune-btn" onclick="bump('komi',-0.5,-30,30)">−</button>
-          <div class="tune-display"><input type="number" name="komi" id="f-komi" value="{{printf "%.1f" .Recommendation.Komi}}" step="0.5" inputmode="decimal"></div>
-          <button type="button" class="tune-btn" onclick="bump('komi',0.5,-30,30)">+</button>
+          <button type="button" class="tune-btn" onclick="bump('komi',-1,-29.5,29.5)">−</button>
+          <div class="tune-display"><input type="number" name="komi" id="f-komi" value="{{printf "%.1f" .Recommendation.Komi}}" step="1" inputmode="decimal"></div>
+          <button type="button" class="tune-btn" onclick="bump('komi',1,-29.5,29.5)">+</button>
         </div>
       </div>
-      <div class="komi-hint">Komi darf negativ sein (Rückkomi) — vor allem auf 9×9 sinnvoll.</div>
+      <div class="komi-hint">Komi darf negativ sein (Rückkomi) — vor allem auf 9×9 sinnvoll. Es endet immer auf ,5, damit es kein Unentschieden geben kann.</div>
     </div>
 
     <div class="winner-row">
@@ -220,7 +226,21 @@ function bump(field, delta, min, max) {
   var el = document.getElementById('f-' + field);
   var v = parseFloat(el.value) || 0;
   v = Math.max(min, Math.min(max, v + delta));
-  el.value = (field === 'komi') ? v.toFixed(1) : Math.round(v);
+  if (field === 'komi') {
+    // Snap to n.5 — a whole-number komi would allow a drawn game.
+    el.value = (Math.round(v - 0.5) + 0.5).toFixed(1);
+  } else {
+    el.value = Math.round(v);
+  }
+}
+
+// Swap which player is Black and which is White. The recommended
+// colours are not always the colours actually played at the board.
+function swapColors() {
+  var b = document.getElementById('f-black'), w = document.getElementById('f-white');
+  var t = b.value; b.value = w.value; w.value = t;
+  var bn = document.getElementById('name-black'), wn = document.getElementById('name-white');
+  t = bn.textContent; bn.textContent = wn.textContent; wn.textContent = t;
 }
 </script>
 {{end}}
