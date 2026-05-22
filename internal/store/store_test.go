@@ -100,14 +100,29 @@ func TestRecordGameUpdatesRatingsAtomically(t *testing.T) {
 		BlackGoRBefore: 800, WhiteGoRBefore: 1000,
 		BlackGoRAfter: 850, WhiteGoRAfter: 970,
 	}
-	if _, err := st.RecordGame(ctx, gm); err != nil {
+	bOverall := RatingState{Rating: 850, Deviation: 200, Volatility: 0.06}
+	wOverall := RatingState{Rating: 970, Deviation: 200, Volatility: 0.06}
+	bCat := CategoryRating{PlayerID: p2.ID, Category: "13x13",
+		RatingState: RatingState{Rating: 850, Deviation: 200, Volatility: 0.06, Games: 1}}
+	wCat := CategoryRating{PlayerID: p1.ID, Category: "13x13",
+		RatingState: RatingState{Rating: 970, Deviation: 200, Volatility: 0.06, Games: 1}}
+	if _, err := st.RecordGame(ctx, gm, bOverall, wOverall, bCat, wCat); err != nil {
 		t.Fatal(err)
 	}
 	if u, _ := st.PlayerByID(ctx, p2.ID); u.GoR != 850 {
-		t.Fatalf("p2 GoR not updated: %.1f", u.GoR)
+		t.Fatalf("p2 rating not updated: %.1f", u.GoR)
 	}
 	if u, _ := st.PlayerByID(ctx, p1.ID); u.GoR != 970 {
-		t.Fatalf("p1 GoR not updated: %.1f", u.GoR)
+		t.Fatalf("p1 rating not updated: %.1f", u.GoR)
+	}
+
+	// The board-size category rating must be written too.
+	cr, err := st.CategoryRating(ctx, p2.ID, "13x13")
+	if err != nil {
+		t.Fatalf("category rating not stored: %v", err)
+	}
+	if cr.Rating != 850 || cr.Games != 1 {
+		t.Fatalf("category rating wrong: %+v", cr)
 	}
 
 	games, err := st.ListRecentGames(ctx, g.ID, 10)

@@ -1,0 +1,75 @@
+{{define "content"}}
+<style>
+.grid-table { width: 100%; border-collapse: collapse; margin: .4rem 0 1.2rem; }
+.grid-table th, .grid-table td { padding: .55rem .7rem; text-align: left; }
+.grid-table thead th { font-size: .8rem; color: #6b7280; font-weight: 600; }
+.grid-table tbody tr { border-top: 1px solid #e5e7eb; }
+.grid-table .cat { font-weight: 600; }
+.grid-row-overall { background: #eef4fb; }
+.grid-row-overall td { font-size: 1.05rem; }
+.strength { font-variant-numeric: tabular-nums; }
+.strength .empty { color: #9ca3af; }
+.profile-head { display: flex; align-items: center; gap: .9rem; margin-bottom: .3rem; }
+.profile-avatar {
+  width: 3rem; height: 3rem; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 1.3rem;
+}
+</style>
+<nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · {{.Player.Name}}</nav>
+
+<div class="profile-head">
+  <div class="profile-avatar" style="background: {{tileColor .Player.Name}}">{{slice .Player.Name 0 1}}</div>
+  <div>
+    <h1 style="margin:0">{{.Player.Name}}</h1>
+    <div class="muted">{{if .Player.Active}}aktiv{{else}}inaktiv{{end}}</div>
+  </div>
+</div>
+
+<h2>Bewertungen</h2>
+<table class="grid-table">
+  <thead><tr><th>Brett</th><th>Spielstärke</th><th>Partien</th></tr></thead>
+  <tbody>
+  {{range .RatingRows}}
+    <tr{{if eq .Label "Gesamt"}} class="grid-row-overall"{{end}}>
+      <td class="cat">{{.Label}}</td>
+      <td class="strength">
+        {{if .Active}}{{rankFull .Rating .Deviation}}{{else}}<span class="empty">— noch keine Partie</span>{{end}}
+      </td>
+      <td>{{if .Active}}{{.Games}}{{else}}0{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+<p class="muted">„Gesamt" ist die OGS-Bewertung über alle Partien; darunter je eine eigene
+Glicko-2-Bewertung pro Brettgröße. Das ± ist die Unsicherheit in Rangstufen.</p>
+
+<h2>Partien</h2>
+{{if .ProfileGames}}
+<div class="table-scroll">
+<table>
+<tr><th>Datum</th><th>Farbe</th><th>Gegner</th><th>Brett</th><th>Vorgabe</th><th>Komi</th><th>Ergebnis</th><th>Δ</th></tr>
+{{range .ProfileGames}}
+  {{$black := eq .BlackPlayerID $.Player.ID}}
+  <tr>
+    <td>{{.PlayedAt.Format "02.01. 15:04"}}</td>
+    <td>{{if $black}}Schwarz{{else}}Weiß{{end}}</td>
+    <td>{{if $black}}{{playerName $.PlayerNames .WhitePlayerID}}{{else}}{{playerName $.PlayerNames .BlackPlayerID}}{{end}}</td>
+    <td>{{.BoardSize}}</td>
+    <td>{{.Handicap}}</td>
+    <td>{{printf "%.1f" .Komi}}</td>
+    <td>
+      {{if $black}}{{if eq .Winner "black"}}Sieg{{else}}Niederlage{{end}}
+      {{else}}{{if eq .Winner "white"}}Sieg{{else}}Niederlage{{end}}{{end}}
+    </td>
+    <td>
+      {{if $black}}{{printf "%+.0f" (sub .BlackGoRAfter .BlackGoRBefore)}}
+      {{else}}{{printf "%+.0f" (sub .WhiteGoRAfter .WhiteGoRBefore)}}{{end}}
+    </td>
+  </tr>
+{{end}}
+</table>
+</div>
+{{else}}<p class="muted">Noch keine Partien.</p>{{end}}
+{{end}}
+{{template "layout" .}}

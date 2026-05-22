@@ -1,74 +1,59 @@
 package rating
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
-func TestRecommended9x9MaxStones(t *testing.T) {
-	// 9x9 caps at 4 stones with komi adjustment for huge gaps.
-	h := Recommended(2000, 100, Board9)
-	if h.Stones != 4 {
-		t.Fatalf("9x9 should cap at 4 stones, got %d", h.Stones)
-	}
-	if h.Komi != -5.5 {
-		t.Fatalf("9x9 ≥420 should give komi -5.5, got %.1f", h.Komi)
-	}
-}
+func approx(a, b float64) bool { return math.Abs(a-b) < 1e-6 }
 
-func TestRecommended13x13Sample(t *testing.T) {
-	cases := []struct {
-		gap  float64
-		want int
-		komi float64
-	}{
-		{50, 0, 6.5},
-		{150, 0, 0.5},
-		{250, 0, -5.5}, // Rückkomi statt 1 Stein
-		{350, 2, 0.5},
-		{500, 3, 0.5},
-		{700, 4, 0.5},
-		{900, 5, 0.5},
-		{1500, 6, 0.5},
-	}
-	for _, c := range cases {
-		h := Recommended(1000+c.gap, 1000, Board13)
-		if h.Stones != c.want || h.Komi != c.komi {
-			t.Errorf("13x13 gap %.0f: got %d/%v, want %d/%v",
-				c.gap, h.Stones, h.Komi, c.want, c.komi)
+func TestHandicapRankDifferencePerfectKomi(t *testing.T) {
+	// Komi 6 is perfect for territory → zero advantage on any board.
+	for _, b := range []BoardSize{Board9, Board13, Board19} {
+		if d := HandicapRankDifference(0, b, perfectKomi); !approx(d, 0) {
+			t.Errorf("%s komi 6: rank diff = %v, want 0", b, d)
 		}
 	}
 }
 
-func TestRecommended19x19Spec(t *testing.T) {
-	// 19×19 nutzt KEIN Rückkomi als Zwischenstufe — direkt von Komi-
-	// adjust auf 2 Steine. Rückkomi erst, wenn 9 Steine erschöpft sind.
+func TestHandicapRankDifferenceBoardSize(t *testing.T) {
+	// 0 stones, komi 0.5: head start 5.5 points.
+	// 9x9 ×6/12 = 2.75 ranks, 13x13 ×3/12 = 1.375, 19x19 ×1/12 ≈ 0.458.
 	cases := []struct {
-		gap  float64
-		want int
-		komi float64
+		board BoardSize
+		want  float64
 	}{
-		{0, 0, 6.5},
-		{150, 0, 0.5}, // Komi-Adjust statt 1 Stein
-		{250, 2, 0.5},
-		{350, 3, 0.5},
-		{450, 4, 0.5},
-		{550, 5, 0.5},
-		{650, 6, 0.5},
-		{750, 7, 0.5},
-		{850, 8, 0.5},
-		{950, 9, 0.5},
-		{1200, 9, -5.5}, // erst hier Rückkomi als Ergänzung
+		{Board9, 2.75},
+		{Board13, 1.375},
+		{Board19, 5.5 / 12},
 	}
 	for _, c := range cases {
-		h := Recommended(2000+c.gap, 2000, Board19)
-		if h.Stones != c.want || h.Komi != c.komi {
-			t.Errorf("19x19 gap %.0f: got %d/%v, want %d/%v",
-				c.gap, h.Stones, h.Komi, c.want, c.komi)
+		if d := HandicapRankDifference(0, c.board, 0.5); !approx(d, c.want) {
+			t.Errorf("%s komi 0.5: rank diff = %v, want %v", c.board, d, c.want)
 		}
 	}
 }
 
-// Es darf nie ein 1-Stein-Vorschlag entstehen — der einzelne Vorgabe-
-// stein ist sinnlos. Stattdessen wird über Komi (inkl. Rückkomi)
-// ausgeglichen, bis ab 2 Steinen wieder eine echte Vorgabe greift.
+func TestHandicapRankDifferenceStones(t *testing.T) {
+	// 1 stone counts as 0 placed stones (OGS num_extra_moves = h-1).
+	if d1, d0 := HandicapRankDifference(1, Board19, 6), HandicapRankDifference(0, Board19, 6); !approx(d1, d0) {
+		t.Errorf("1 stone (%v) should equal 0 stones (%v)", d1, d0)
+	}
+	// 2 stones on 9x9, komi 0.5: head 6-0.5+12 = 17.5 → ×6/12 = 8.75.
+	if d := HandicapRankDifference(2, Board9, 0.5); !approx(d, 8.75) {
+		t.Errorf("2 stones 9x9: %v, want 8.75", d)
+	}
+}
+
+func TestHandicapAdjustmentZero(t *testing.T) {
+	// Perfect komi, no stones → no rating adjustment.
+	for _, b := range []BoardSize{Board9, Board13, Board19} {
+		if a := HandicapAdjustment("black", 1000, 0, b, perfectKomi); math.Abs(a) > 1e-6 {
+			t.Errorf("%s: adjustment = %v, want 0", b, a)
+		}
+	}
+}
+
 func TestRecommendedNeverOneStone(t *testing.T) {
 	for _, board := range []BoardSize{Board9, Board13, Board19} {
 		for d := 0.0; d < 1500; d += 25 {
@@ -81,13 +66,37 @@ func TestRecommendedNeverOneStone(t *testing.T) {
 }
 
 func TestRecommendedSymmetric(t *testing.T) {
-	// Recommended should not depend on the order of (a, b).
-	a, b := 1500.0, 1100.0
+	a, b := 1500.0, 900.0
 	for _, board := range []BoardSize{Board9, Board13, Board19} {
-		ha := Recommended(a, b, board)
-		hb := Recommended(b, a, board)
-		if ha != hb {
+		if ha, hb := Recommended(a, b, board), Recommended(b, a, board); ha != hb {
 			t.Errorf("asymmetric on %s: %v vs %v", board, ha, hb)
+		}
+	}
+}
+
+// On 9x9 a stone is worth six ranks, so small gaps stay at 0 stones and
+// are carried by komi alone.
+func TestRecommended9x9KomiFirst(t *testing.T) {
+	weak := FromRankMust(t, "20k")
+	for _, rk := range []string{"20k", "19k", "18k", "17k", "16k", "15k"} {
+		strong := FromRankMust(t, rk)
+		h := Recommended(strong, weak, Board9)
+		if h.Stones != 0 {
+			t.Errorf("9x9 %s vs 20k: %d stones, expected 0 (komi-carried)", rk, h.Stones)
+		}
+	}
+}
+
+func TestRecommendedConsistentWithRating(t *testing.T) {
+	// A recommendation should roughly neutralise the gap: applying its
+	// handicap rank difference should land near the actual rank gap.
+	strong, weak := FromRankMust(t, "8k"), FromRankMust(t, "15k")
+	for _, board := range []BoardSize{Board9, Board13, Board19} {
+		h := Recommended(strong, weak, board)
+		gap := RatingToRank(strong) - RatingToRank(weak)
+		got := HandicapRankDifference(h.Stones, board, h.Komi)
+		if math.Abs(got-gap) > 1.0 {
+			t.Errorf("%s: handicap covers %.2f ranks, gap is %.2f", board, got, gap)
 		}
 	}
 }
@@ -104,20 +113,24 @@ func TestParseBoardSize(t *testing.T) {
 }
 
 func TestFromRankRoundtrip(t *testing.T) {
-	cases := map[string]float64{
-		"1d":  2050,
-		"2d":  2150,
-		"1k":  1950,
-		"5k":  1550,
-		"15k": 550,
-		"30k": 100,
-		"1p":  2700,
-	}
-	for s, want := range cases {
-		got, err := FromRank(s)
-		if err != nil || got != want {
-			t.Errorf("FromRank(%q) = %.1f, %v; want %.1f", s, got, err, want)
+	for _, rk := range []string{"30k", "20k", "15k", "10k", "1k", "1d", "5d"} {
+		r, err := FromRank(rk)
+		if err != nil {
+			t.Fatalf("FromRank(%q): %v", rk, err)
 		}
+		if got := FormatRank(r); got != rk {
+			t.Errorf("FormatRank(FromRank(%q)) = %q", rk, got)
+		}
+	}
+}
+
+func TestFromRank30k(t *testing.T) {
+	r, err := FromRank("30k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !approx(r, 525) {
+		t.Errorf("30k = %v, want 525 (OGS rank 0)", r)
 	}
 }
 
@@ -129,34 +142,11 @@ func TestFromRankErrors(t *testing.T) {
 	}
 }
 
-func TestFormatRank(t *testing.T) {
-	cases := map[float64]string{
-		2050: "1d",
-		2150: "2d",
-		1950: "1k",
-		1550: "5k",
-		100:  "20k",
-		2700: "1p",
+func FromRankMust(t *testing.T, s string) float64 {
+	t.Helper()
+	r, err := FromRank(s)
+	if err != nil {
+		t.Fatalf("FromRank(%q): %v", s, err)
 	}
-	for gor, want := range cases {
-		if got := FormatRank(gor); got != want {
-			t.Errorf("FormatRank(%.0f) = %s, want %s", gor, got, want)
-		}
-	}
-}
-
-func TestHandicapBonusAcrossBoards(t *testing.T) {
-	h := Handicap{Stones: 4, Komi: 0.5}
-	if g := h.HandicapBonus(Board9); g != (4-0.5)*50 {
-		t.Errorf("9x9 4-stone bonus: %f", g)
-	}
-	if g := h.HandicapBonus(Board13); g != (4-0.5)*70 {
-		t.Errorf("13x13 4-stone bonus: %f", g)
-	}
-	if g := h.HandicapBonus(Board19); g != (4-0.5)*100 {
-		t.Errorf("19x19 4-stone bonus: %f", g)
-	}
-	if g := (Handicap{}).HandicapBonus(Board19); g != 0 {
-		t.Errorf("0-stone bonus must be 0, got %f", g)
-	}
+	return r
 }

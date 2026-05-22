@@ -102,6 +102,62 @@ func TestRecordGameEvenGameUsesKomi65(t *testing.T) {
 	}
 }
 
+func TestRecordGameWritesCategoryRating(t *testing.T) {
+	svc := newSvc(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroup(ctx, "Group")
+	a, _ := svc.Store.CreatePlayer(ctx, g.ID, "A", 1000)
+	b, _ := svc.Store.CreatePlayer(ctx, g.ID, "B", 1000)
+
+	if _, err := svc.RecordGame(ctx, g.ID, a.ID, b.ID, rating.Board9, 0, math.NaN(), true); err != nil {
+		t.Fatal(err)
+	}
+	cr, err := svc.Store.CategoryRating(ctx, a.ID, "9x9")
+	if err != nil {
+		t.Fatalf("9x9 category rating missing: %v", err)
+	}
+	if cr.Games != 1 {
+		t.Errorf("9x9 games = %d, want 1", cr.Games)
+	}
+	// A game on 9x9 must not create a 13x13 rating.
+	if _, err := svc.Store.CategoryRating(ctx, a.ID, "13x13"); err == nil {
+		t.Error("13x13 rating should not exist after a 9x9-only game")
+	}
+}
+
+// RecomputeGroup replays history from each player's seed; since live
+// recording also starts from the seed, a recompute must reproduce the
+// exact same ratings.
+func TestRecomputeGroupReproducesRatings(t *testing.T) {
+	svc := newSvc(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroup(ctx, "Group")
+	a, _ := svc.Store.CreatePlayer(ctx, g.ID, "A", 1000)
+	b, _ := svc.Store.CreatePlayer(ctx, g.ID, "B", 700)
+
+	for i := 0; i < 5; i++ {
+		if _, err := svc.RecordGame(ctx, g.ID, b.ID, a.ID, rating.Board9, 0, math.NaN(), i%2 == 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := svc.Store.PlayerByID(ctx, a.ID)
+	beforeCat, _ := svc.Store.CategoryRating(ctx, a.ID, "9x9")
+
+	if err := svc.RecomputeGroup(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := svc.Store.PlayerByID(ctx, a.ID)
+	afterCat, _ := svc.Store.CategoryRating(ctx, a.ID, "9x9")
+
+	if math.Abs(before.GoR-after.GoR) > 1e-6 || math.Abs(before.Deviation-after.Deviation) > 1e-6 {
+		t.Errorf("recompute changed overall rating: %.4f/%.4f → %.4f/%.4f",
+			before.GoR, before.Deviation, after.GoR, after.Deviation)
+	}
+	if math.Abs(beforeCat.Rating-afterCat.Rating) > 1e-6 || beforeCat.Games != afterCat.Games {
+		t.Errorf("recompute changed 9x9 rating: %+v → %+v", beforeCat, afterCat)
+	}
+}
+
 func TestRecordGameRejectsSamePlayer(t *testing.T) {
 	svc := newSvc(t)
 	ctx := context.Background()

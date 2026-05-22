@@ -1,75 +1,59 @@
-# Spielstärke (GoR)
+# Spielstärke (OGS-Rating)
 
-Go-Liga benutzt das **EGF-Rating-System** der [European Go Federation](https://www.europeangodatabase.eu/EGD/EGF_rating_system.php) — das offizielle Punktesystem aller europäischen Go-Verbände.
+Go-Liga benutzt das **Rating-System von [Online-Go.com](https://online-go.com) (OGS)** — den größten Go-Server der Welt. Der Algorithmus ist quelloffen ([online-go/goratings](https://github.com/online-go/goratings), MIT-Lizenz) und hier 1:1 nach Go portiert. Kern ist **Glicko-2**.
 
-## Die Skala
+## Warum OGS und nicht EGF?
 
-Die EGF-GoR ist eine Zahl, die ungefähr die Spielstärke ausdrückt. Höhere Werte sind stärker. Pro Rangstufe liegen genau 100 GoR-Punkte. Verankert wird die Skala bei **1 Dan = 2100 GoR**:
+Das EGF-System der European Go Federation wertet zwar Vorgabepartien, ist aber brettgrößen-blind und kennt nur Steine, kein Komi. Genau das ist auf 9×9 unbrauchbar. OGS rechnet Vorgabe **brettgrößen- und komi-bewusst** (siehe [Vorgabe und Komi](/docs/03-handicap)) und sieht ausdrücklich vor, dass man Spieler allein auf 9×9 bewertet — ideal für eine Kinder-AG.
 
-| GoR | Rang |
-|---|---|
-| 2700+ | 1 Pro (≈ 7 Dan Amateur) |
-| 2600 | 6 Dan |
-| 2100 | 1 Dan |
-| 2000 | 1 Kyu |
-| 1500 | 6 Kyu |
-| 1000 | 11 Kyu |
-| 500 | 16 Kyu |
-| 100 | 20 Kyu |
+## Die drei Glicko-2-Werte
 
-Quelle: [Wikipedia — Go ranks and ratings](https://en.wikipedia.org/wiki/Go_ranks_and_ratings), zitiert aus der EGF-Spec. Theoretisch geht die GoR bis -900 herunter (siehe [GorCalculator-Konstanten](https://github.com/barcicki/GorCalculator/blob/master/app/src/main/java/com/barcicki/gorcalculator/core/Calculator.java)), praktisch werden Werte unter 100 (= 20 Kyu) aber nicht differenziert — die EGF zeigt das als Untergrenze.
+Statt einer einzigen Zahl führt jeder Spieler **drei** Werte (Glicko-2-Paper, Glickman):
 
-Wenn die Trainerin einen neuen Spieler mit Rang „15k" anlegt, übersetzt Go-Liga das in eine Start-GoR von 550. Das ist nur eine Schätzung — nach den ersten Partien justiert sich der Wert.
+- **Rating** ($r$) — die geschätzte Spielstärke.
+- **Deviation** ($\mathrm{RD}$) — die Unsicherheit dieser Schätzung. Neue Spieler starten mit hoher Deviation; sie sinkt mit jeder Partie.
+- **Volatility** ($\sigma$) — wie sprunghaft sich die Stärke ändert.
 
-## Wie wird die GoR nach einer Partie angepasst?
+Intern rechnet Glicko-2 auf einer transformierten Skala ($\mu$, $\phi$); die Anzeige nutzt $r = 173{,}7178\,\mu + 1500$.
 
-Die EGF-Formel (Stand seit April 2021, [skillratings::egf](https://docs.rs/skillratings/latest/src/skillratings/egf.rs.html) bzw. [barcicki/GorCalculator/Calculator.java](https://github.com/barcicki/GorCalculator/blob/master/app/src/main/java/com/barcicki/gorcalculator/core/Calculator.java)) hat drei Komponenten.
+## Die Rang-Skala
 
-**Erwartetes Ergebnis** für Spieler A gegen B:
+Rating und Rang hängen über das OGS-„log"-System zusammen (`a = 525`, `c = 23{,}15`):
 
 $$
-\mathrm{SE}(A, B) = \frac{1}{1 + \exp(\beta(R_B) - \beta(R_A))}
-\quad\text{mit}\quad
-\beta(R) = -7 \cdot \ln(3300 - R)
+r = 525 \cdot e^{\,\text{Rang}/23{,}15}
+\qquad
+\text{Rang} = \ln(r/525)\cdot 23{,}15
 $$
 
-Bei einer Vorgabe von $h$ Steinen für Schwarz wird vor der Rechnung Schwarz' GoR temporär um $100 \cdot (h - 0.5)$ erhöht — die EGF rechnet Vorgabe-Steine als Rating-Bonus.
+Die fortlaufende Rang-Nummer folgt der OGS-Konvention: **Rang 0 = 30 Kyu**, Rang 29 = 1 Kyu, Rang 30 = 1 Dan. Deshalb reicht die Skala bis **30 Kyu** hinunter — Rang 0 ist ihr natürlicher Boden. Für Anfänger-Kinder genau richtig.
 
-**Volatilitäts­koeffizient** (auch *con* genannt):
+Die Profilanzeige zeigt den Rang mit einer Nachkommastelle plus ein $\pm$, das die Deviation in Rangstufen ausdrückt — z.B. `11,0k ± 1,5`.
 
-$$
-\mathrm{con}(R) = \left(\frac{3300 - R}{200}\right)^{1.6}
-$$
+## Das Bewertungs-Raster
 
-`con` ist groß bei niedrigen Ratings (Anfänger bewegen sich schnell) und klein bei Dan-Spielern (deren GoR ist stabil).
+Wie auf OGS hat jeder Spieler **nicht eine, sondern mehrere** Bewertungen:
 
-**Anti-Deflations-Bonus**:
+- **Gesamt** — eine Glicko-2-Bewertung über *alle* Partien.
+- **9×9**, **13×13**, **19×19** — je eine eigene Glicko-2-Bewertung nur aus den Partien dieser Brettgröße.
 
-$$
-\mathrm{bonus}(R) = \frac{\ln\bigl(1 + \exp\bigl(\tfrac{2300 - R}{80}\bigr)\bigr)}{5}
-$$
+Jede Partie aktualisiert ihre Brett-Kategorie *und* die Gesamt-Bewertung. Ein Kind, das nur 9×9 spielt, bekommt so trotzdem ein vollwertiges, aussagekräftiges Ranking. Wechselt es später auf 13×13, wächst eine zweite Kategorie heran, ohne dass das Gesamt-Rating bei null beginnt.
 
-Dieser kleine Bonus kompensiert die Tendenz des Systems, in Anfänger-Pools insgesamt Rating zu verlieren.
+Nach der OGS-v5-Regel wird beim Aktualisieren einer Brett-Kategorie die *eigene* Seite aus dieser Kategorie genommen, der **Gegnerwert** aber aus dessen Gesamt-Bewertung.
 
-**Update-Formel**:
+## Wie eine Partie das Rating ändert
 
-$$
-R_\text{neu} = R + \mathrm{con}(R) \cdot \bigl(S - \mathrm{SE}\bigr) + \mathrm{bonus}(R)
-$$
+Pro Partie ist genau eine „Rating-Periode" mit einem Spiel. Für jeden Spieler wird die Glicko-2-Aktualisierung gerechnet:
 
-Wobei $S = 1$ bei Sieg, $S = 0$ bei Niederlage. Beide Spieler werden in derselben Partie aktualisiert, jeder mit seinem eigenen `con`.
+- **Erwartetes Ergebnis** $E$ aus der Rating-Differenz (die Vorgabe verschiebt dabei den Gegner, siehe [Vorgabe und Komi](/docs/03-handicap)).
+- **Neues Rating, neue Deviation, neue Volatility** nach dem Glicko-2-Verfahren (Schritt 3–8 des Glickman-Papers).
+
+Sieg gegen einen stärkeren Gegner hebt das Rating stark, Niederlage gegen einen schwächeren senkt es; wie stark, hängt von beiden Deviations ab.
 
 ## GoR-Snapshot pro Partie
 
-**Wichtig**: Wenn eine Partie eingetragen wird, werden die GoR-Werte beider Spieler *zum Zeitpunkt der Eintragung* zusammen mit der Partie eingefroren (Felder `black_gor_before`, `black_gor_after`, `white_gor_before`, `white_gor_after` in der Datenbank). Das hat zwei Konsequenzen:
+Bei jeder Eintragung wird die *Gesamt*-Bewertung beider Spieler vorher und nachher mit der Partie eingefroren. Die Spieler-Tabelle führt nur den *aktuellen* Stand.
 
-- Die Spieler-Tabelle führt nur die *aktuelle* GoR; in den Partien steht der historische Wert.
-- Eine nachträgliche Änderung der Spieler-GoR (z.B. durch externe Kalibrierung, siehe unten) ändert frühere Partien *nicht*.
+## Bewertungen neu berechnen
 
-Eine vollständige Neuberechnung der Historie wäre möglich (chronologisch alle Partien mit neuen Startwerten durchrechnen), ist aktuell aber kein Knopf in der App.
-
-## Externe Rating-Quellen abgleichen
-
-Falls in Zukunft Spieler auch auf [OGS](https://online-go.com), [KGS](https://www.gokgs.com), oder einem offiziellen EGF-Turnier spielen, wäre es sinnvoll, deren externes Rating als Anker zu nutzen — gerade weil unser Pool klein ist und das interne Rating dadurch zu langsam justieren könnte.
-
-Geplanter Ansatz (noch nicht implementiert): die Spieler-Tabelle bekommt optionale Felder `external_source` (z.B. `"ogs"`, `"egd"`) und `external_id`. Ein Sync-Job zieht regelmäßig deren aktuelle Werte; bei großer Abweichung kann die interne GoR sanft an den externen Wert herangezogen werden (kein harter Reset). Das ist aber Roadmap-Material, kein Code heute.
+Auf dem Gruppen-Dashboard gibt es **„Bewertungen neu berechnen"**. Das spielt die *komplette* Partie-Historie chronologisch erneut durch die Engine — von jedem Spieler-Startwert (Seed) an. Der Vorgang ist deterministisch (gleiche Partien → gleiches Ergebnis) und beliebig oft wiederholbar. Nützlich nach einer Korrektur an Altdaten oder zur Migration.

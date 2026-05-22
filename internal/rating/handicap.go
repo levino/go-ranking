@@ -1,6 +1,9 @@
 package rating
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // BoardSize is the side length of the playing board.
 type BoardSize int
@@ -11,9 +14,7 @@ const (
 	Board19 BoardSize = 19
 )
 
-func (b BoardSize) String() string {
-	return fmt.Sprintf("%dx%d", int(b), int(b))
-}
+func (b BoardSize) String() string { return fmt.Sprintf("%dx%d", int(b), int(b)) }
 
 func ParseBoardSize(s string) (BoardSize, error) {
 	switch s {
@@ -27,146 +28,99 @@ func ParseBoardSize(s string) (BoardSize, error) {
 	return 0, fmt.Errorf("invalid board size %q", s)
 }
 
-// Handicap describes a fair handicap setup for a single pairing.
+// Handicap describes a fair handicap setup for one pairing.
 type Handicap struct {
-	Stones int     // number of placed handicap stones (0 = even game)
+	Stones int     // placed handicap stones (0 = even game)
 	Komi   float64 // komi awarded to white
 }
 
-// Per-stone GoR-equivalent value used when converting a placed
-// handicap into a rating bonus for the expected-score calculation.
-//
-// 19×19 uses the EGF value of 100 GoR per stone — one rank in the EGF
-// system maps to one handicap stone on the full board.
-//
-// Smaller boards use deliberately lower values for the RATING
-// computation, even though the THEORETICAL stone value is higher on
-// small boards (Wikipedia: 13×13 ≈ 2.5–3 ranks/stone, 9×9 ≈ 6
-// ranks/stone). The theoretical scaling drives only when stones are
-// recommended (rec9/rec13 are conservative with stone counts); for
-// rating points we use lower values to reflect how much we TRUST the
-// placed handicap to actually neutralize the gap — on tiny boards a
-// single overlooked move flips the result, so the rating shift on a
-// won/lost handicap game should be smaller, not larger.
+// Handicap/komi model — ported from OGS analysis/util/RatingMath.py
+// (get_handicap_rank_difference / get_handicap_adjustment). Rules are
+// fixed to japanese (territory scoring): perfect komi 6, free-stone
+// territorial value 12, no handicap scoring bonus.
 const (
-	stoneValue9  = 50
-	stoneValue13 = 70
-	stoneValue19 = 100
+	perfectKomi = 6.0  // best estimate of perfect territory komi
+	stoneValue  = 12.0 // territorial value of a free stone (2 * perfectKomi)
 )
 
-func stoneValue(b BoardSize) float64 {
+// boardMultiplier scales a head-start in points to a rank difference.
+// OGS: ×6 for 9x9, ×3 for 13x13, ×1 for 19x19 (and any other size).
+func boardMultiplier(b BoardSize) float64 {
 	switch b {
 	case Board9:
-		return stoneValue9
+		return 6
 	case Board13:
-		return stoneValue13
-	}
-	return stoneValue19
-}
-
-// Recommended returns the recommended handicap for a pairing where
-// `stronger` is the higher rated player and `weaker` the other.
-func Recommended(stronger, weaker float64, board BoardSize) Handicap {
-	d := stronger - weaker
-	if d < 0 {
-		d = -d
-	}
-	switch board {
-	case Board9:
-		return rec9(d)
-	case Board13:
-		return rec13(d)
+		return 3
 	default:
-		return rec19(d)
+		return 1
 	}
 }
 
-// Vorgabe-Tabelle: 1 Stein gibt es bewusst nicht. Ein einzelner
-// Vorgabestein ist im Go sinnlos — er ist zu schwach für nennenswerten
-// Ausgleich, aber zu viel, um als "fast ebene" Partie durchzugehen.
-// Stattdessen wird der schmale Bereich zwischen "Komi 6,5" und
-// "2 Steine" durch Komi-Anpassung überbrückt: Rückkomi (negatives
-// Komi für Schwarz) bzw. reduziertes Komi für Weiß.
-
-func rec9(d float64) Handicap {
-	switch {
-	case d < 70:
-		return Handicap{0, 6.5}
-	case d < 140:
-		return Handicap{0, 0.5} // leichter Ausgleich über Komi
-	case d < 210:
-		return Handicap{0, -5.5} // Rückkomi statt 1 Stein
-	case d < 280:
-		return Handicap{2, 0.5}
-	case d < 350:
-		return Handicap{3, 0.5}
-	case d < 420:
-		return Handicap{4, 0.5}
+// HandicapRankDifference returns Black's advantage, in ranks, for a
+// game with the given placed stones and komi on the given board.
+// Ported from get_handicap_rank_difference (japanese rules branch).
+func HandicapRankDifference(stones int, board BoardSize, komi float64) float64 {
+	numExtraMoves := 0
+	if stones > 1 {
+		numExtraMoves = stones - 1
 	}
-	return Handicap{4, -5.5}
+	blackHeadStart := perfectKomi - komi + stoneValue*float64(numExtraMoves)
+	return blackHeadStart * boardMultiplier(board) / stoneValue
 }
 
-func rec13(d float64) Handicap {
-	switch {
-	case d < 100:
-		return Handicap{0, 6.5}
-	case d < 200:
-		return Handicap{0, 0.5} // leichter Ausgleich über Komi
-	case d < 300:
-		return Handicap{0, -5.5} // Rückkomi statt 1 Stein
-	case d < 450:
-		return Handicap{2, 0.5}
-	case d < 600:
-		return Handicap{3, 0.5}
-	case d < 800:
-		return Handicap{4, 0.5}
-	case d < 1000:
-		return Handicap{5, 0.5}
-	}
-	return Handicap{6, 0.5}
-}
-
-// rec19 — auf dem vollen Brett wird auf jeden Fall mit Steinen
-// ausgeglichen, **nicht** mit Rückkomi. Die Steine-Skala reicht bis 9;
-// erst wenn diese ausgeschöpft sind, kommt Rückkomi als Ergänzung
-// dazu (siehe Sensei's Library / EGF-Praxis).
+// HandicapAdjustment returns the rating delta to apply to one player so
+// the expected-score calculation accounts for the handicap. Ported from
+// get_handicap_adjustment: it shifts the player by the handicap rank
+// difference in rank space, then converts back to a rating delta.
 //
-// Zwischen "0 Steine + Komi 0,5" und "2 Steine + Komi 0,5" liegt nur
-// eine Komi-Stufe (kein 1-Stein), entsprechend der Go-Konvention.
-func rec19(d float64) Handicap {
-	switch {
-	case d < 100:
-		return Handicap{0, 6.5}
-	case d < 200:
-		return Handicap{0, 0.5} // Komi-Adjust statt 1 Stein
-	case d < 300:
-		return Handicap{2, 0.5}
-	case d < 400:
-		return Handicap{3, 0.5}
-	case d < 500:
-		return Handicap{4, 0.5}
-	case d < 600:
-		return Handicap{5, 0.5}
-	case d < 700:
-		return Handicap{6, 0.5}
-	case d < 800:
-		return Handicap{7, 0.5}
-	case d < 900:
-		return Handicap{8, 0.5}
-	case d < 1000:
-		return Handicap{9, 0.5}
+// player must be "black" or "white".
+func HandicapAdjustment(player string, rating float64, stones int, board BoardSize, komi float64) float64 {
+	rankDiff := HandicapRankDifference(stones, board, komi)
+	var effectiveRank float64
+	if player == "black" {
+		effectiveRank = RatingToRank(rating) + rankDiff
+	} else {
+		effectiveRank = RatingToRank(rating) - rankDiff
 	}
-	// >1000 GoR diff: 9 Steine sind ausgeschöpft, Rückkomi als zusätzlicher
-	// Ausgleich für den Schwächeren (Komi für Weiß wird negativ).
-	return Handicap{9, -5.5}
+	return RankToRating(effectiveRank) - rating
 }
 
-// HandicapBonus returns the GoR-equivalent of the placed handicap
-// stones for use in the rating expected-score calculation.
-func (h Handicap) HandicapBonus(board BoardSize) float64 {
-	if h.Stones == 0 {
-		return 0
+// recommendation komi range: from the even-game komi down to a reverse
+// komi of -6.5; beyond that an extra stone is placed instead.
+const (
+	recKomiMax   = 6.5
+	recKomiMin   = -6.5
+	recMaxStones = 9
+)
+
+// Recommended returns the suggested handicap for a pairing, derived by
+// inverting the OGS handicap formula: it finds the (stones, komi) whose
+// HandicapRankDifference matches the players' rank gap. Small gaps are
+// absorbed by komi alone; a stone is added only once komi would leave
+// the playable range. This keeps 9x9 games finely graded — on 9x9 a
+// stone is worth six ranks, so komi carries roughly the first six.
+func Recommended(stronger, weaker float64, board BoardSize) Handicap {
+	gap := RatingToRank(stronger) - RatingToRank(weaker)
+	if gap < 0 {
+		gap = -gap
 	}
-	// EGF convention: H stones ≈ (H - 0.5) * stoneValue.
-	return (float64(h.Stones) - 0.5) * stoneValue(board)
+	// Target head start (in points): invert rankDiff = head*mult/stoneValue.
+	head := gap * stoneValue / boardMultiplier(board)
+
+	for _, stones := range []int{0, 2, 3, 4, 5, 6, 7, 8, 9} {
+		numExtra := 0
+		if stones > 1 {
+			numExtra = stones - 1
+		}
+		komi := perfectKomi - head + stoneValue*float64(numExtra)
+		if komi >= recKomiMin || stones == recMaxStones {
+			return Handicap{Stones: stones, Komi: roundHalf(clamp(komi, -50, recKomiMax))}
+		}
+	}
+	return Handicap{Stones: 0, Komi: recKomiMax}
+}
+
+// roundHalf rounds to the nearest 0.5 (a playable komi value).
+func roundHalf(v float64) float64 {
+	return math.Round(v*2) / 2
 }

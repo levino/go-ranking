@@ -1,115 +1,51 @@
 # Vorgabe und Komi
 
-Go-Spiele zwischen unterschiedlich starken Spielern brauchen einen Ausgleich, damit sie für beide Seiten spannend bleiben. Go nutzt dafür zwei Mechaniken: **Vorgabesteine** und **Komi**.
+Go-Spiele zwischen unterschiedlich starken Spielern brauchen einen Ausgleich. Go nutzt dafür **Vorgabesteine** und **Komi**. Go-Liga rechnet beides mit dem **OGS-Vorgabemodell** — derselben quelloffenen Formel, die auch das Rating verwendet (`get_handicap_rank_difference` aus [online-go/goratings](https://github.com/online-go/goratings), `analysis/util/RatingMath.py`, MIT).
 
 ## Komi — kurz erklärt
 
-Komi sind Punkte, die **Weiß** am Spielende dazubekommt (für den Nachteil, nicht als Erster zu ziehen). Komi gilt *immer nur für Weiß* — Schwarz bekommt nie Komi.
-
-- Positives Komi (Standard, z.B. 6,5) = Weiß bekommt Punkte hinzugezählt.
-- Negatives Komi (sogenanntes **Rückkomi**) = Weiß werden Punkte abgezogen.
-
-Der halbe Punkt (`,5`) verhindert Unentschieden. Die [EGF-Turnierregeln](https://www.eurogofed.org/egf/tourrules.htm) setzen 6,5 als Default für ebene Partien.
+Komi sind Punkte, die **Weiß** am Spielende dazubekommt. Positives Komi ist der Standard; negatives Komi heißt **Rückkomi** (Weiß werden Punkte abgezogen — ein Ausgleich zugunsten von Schwarz). Der halbe Punkt (`,5`) verhindert Unentschieden.
 
 ## Vorgabesteine
 
-Vor dem Spiel platziert Schwarz $N$ Vorgabesteine auf den Sternpunkten (Hoshi). **Danach** zieht Weiß den ersten regulären Zug. Dadurch ist Schwarz zu Beginn schon mit $N$ Steinen auf dem Brett, hat aber den Initiativ-Vorteil abgegeben (Weiß zieht jetzt zuerst).
+Vor dem Spiel platziert Schwarz $N$ Vorgabesteine, danach zieht Weiß zuerst.
 
-### Warum es keine 1-Stein-Vorgabe gibt
+**Ein einzelner Vorgabestein zählt nicht.** Das OGS-Modell setzt `num_extra_moves = Steine − 1` (und nie unter 0): Eine 1-Stein-Vorgabe ist rechnerisch identisch mit 0 Steinen — nur das Komi unterscheidet sich. Echte platzierte Vorgabe greift erst ab 2 Steinen. Das entspricht der Go-Konvention; kleine Abstände werden über Komi ausgeglichen.
 
-Eine *einzelne* Vorgabe wäre konzeptuell sinnlos: Schwarz würde 1 Stein platzieren, dann Weiß ziehen — das ist effektiv dieselbe Situation wie ein ebenes Spiel, bei dem Schwarz einfach als erster Zug auf einen Sternpunkt setzt. Die Logik der Vorgabe — *Schwarz baut eine Anfangs-Stellung auf, bevor Weiß überhaupt einsteigt* — funktioniert erst ab zwei Steinen.
+## Die OGS-Formel
 
-Die [British Go Association](https://www.britgo.org/about/rating) formuliert das so:
+Go-Liga spielt mit **japanischen Regeln** (Gebietswertung). Schwarz' Vorsprung in Punkten ist
 
-> *If the difference in grades is only one then usually the weaker player just takes the Black stones and doesn't give komi.*
+$$
+\text{Vorsprung} = 6 - \text{Komi} + 12 \cdot (\text{Steine}-1)_{\ge 0}
+$$
 
-Anders gesagt: Bei einem Rang Unterschied gibt es **keine platzierte Vorgabe**, sondern eine *Komi-Anpassung* — der schwächere Spieler nimmt Schwarz, das Komi für Weiß sinkt von 6,5 auf 0,5. Auch [Wikipedia: Handicapping in Go](https://en.wikipedia.org/wiki/Handicapping_in_Go) bestätigt diese Konvention.
+mit perfektem Komi 6 und einem Steinwert von 12 Punkten. Geteilt durch 12 und multipliziert mit einem **Brettgrößen-Faktor** ergibt das die Rangdifferenz, die die Vorgabe abdeckt:
 
-## Die Vorgabe-Tabellen
+| Brett | Faktor | Bedeutung |
+|---|---|---|
+| 9×9   | 6 | ein Stein ≈ 6 Ränge |
+| 13×13 | 3 | ein Stein ≈ 3 Ränge |
+| 19×19 | 1 | ein Stein ≈ 1 Rang |
 
-### 19×19 — volles Brett
+Dadurch ist ein Stein auf 9×9 sechsmal so viel wert wie auf 19×19 — genau deshalb ist eine Stein-Tabelle vom großen Brett auf 9×9 unbrauchbar.
 
-Auf dem vollen Brett wird **alles** über Steine ausgeglichen, nicht über Rückkomi. Rückkomi greift erst, wenn die 9 Steine ausgeschöpft sind — die [BGA-Praxis](https://www.britgo.org/about/rating) sagt dazu: *„Typically very few games are played with more than 9 handicap stones."*
+## Wie Vorgabe ins Rating einfließt
 
-<table>
-<thead><tr><th>GoR-Differenz</th><th>Vorgabe</th><th>Komi</th></tr></thead>
-<tbody>
-<tr><td>0–100</td><td>0 Steine</td><td>6,5 (ebene Partie)</td></tr>
-<tr><td>100–200</td><td>0 Steine</td><td>0,5 (1-Rang-Konvention)</td></tr>
-<tr><td>200–300</td><td>2 Steine</td><td>0,5</td></tr>
-<tr><td>300–400</td><td>3 Steine</td><td>0,5</td></tr>
-<tr><td>400–500</td><td>4 Steine</td><td>0,5</td></tr>
-<tr><td>500–600</td><td>5 Steine</td><td>0,5</td></tr>
-<tr><td>600–700</td><td>6 Steine</td><td>0,5</td></tr>
-<tr><td>700–800</td><td>7 Steine</td><td>0,5</td></tr>
-<tr><td>800–900</td><td>8 Steine</td><td>0,5</td></tr>
-<tr><td>900–1000</td><td>9 Steine</td><td>0,5</td></tr>
-<tr><td>≥ 1000</td><td>9 Steine</td><td><strong>−5,5 (Rückkomi)</strong></td></tr>
-</tbody>
-</table>
+Anders als beim alten EGF-System fließt **Komi voll mit ein** — nicht nur die Steine. Für die Rating-Berechnung wird der Gegner um die berechnete Rangdifferenz verschoben (`get_handicap_adjustment`): Bei einer fairen Vorgabe sieht das System die Partie als ausgeglichen, und ein Sieg des schwächeren Spielers wird entsprechend gewertet — kein Scheinsieg mehr. Rückkomi und nicht-Standard-Komi sind dabei sauber abgedeckt.
 
-### 13×13 — mittel
+## Die Empfehlung
 
-Eine *offizielle* EGF-Tabelle für 13×13 gibt es nicht ([EGF General Tournament Rules](https://www.eurogofed.org/egf/tourrules.htm) überlassen das den jeweiligen Turnier-Konventionen). [Wikipedia: Handicapping in Go](https://en.wikipedia.org/wiki/Handicapping_in_Go) zitiert die etablierte Skalierung: 13×13 ≈ 2,5–3 Ränge pro Stein. Wir spendieren Rückkomi als Zwischenstufe vor der ersten echten Vorgabe.
+Der Wizard empfiehlt eine Vorgabe, indem er **dieselbe OGS-Formel umkehrt**: Er sucht die Kombination aus Steinen und Komi, deren Rangdifferenz die Stärkelücke der beiden Spieler trifft.
 
-<table>
-<thead><tr><th>GoR-Differenz</th><th>Vorgabe</th><th>Komi</th></tr></thead>
-<tbody>
-<tr><td>0–100</td><td>0 Steine</td><td>6,5</td></tr>
-<tr><td>100–200</td><td>0 Steine</td><td>0,5</td></tr>
-<tr><td>200–300</td><td>0 Steine</td><td><strong>−5,5 (Rückkomi)</strong></td></tr>
-<tr><td>300–450</td><td>2 Steine</td><td>0,5</td></tr>
-<tr><td>450–600</td><td>3 Steine</td><td>0,5</td></tr>
-<tr><td>600–800</td><td>4 Steine</td><td>0,5</td></tr>
-<tr><td>800–1000</td><td>5 Steine</td><td>0,5</td></tr>
-<tr><td>≥ 1000</td><td>6 Steine</td><td>0,5</td></tr>
-</tbody>
-</table>
+- Kleine Abstände werden **allein über Komi** ausgeglichen (bis hinunter zu Rückkomi −6,5).
+- Ein Stein kommt erst dazu, wenn Komi den spielbaren Bereich verlassen würde.
 
-### 9×9 — schnelle Partie
-
-Auf 9×9 ist ein Stein ungleich mehr wert: [Wikipedia](https://en.wikipedia.org/wiki/Handicapping_in_Go) nennt ≈ 6 Ränge pro Stein. Die Tabelle bleibt deshalb lange bei 0 Steinen und nutzt Rückkomi als Zwischenstufe. Auch das Maximum ist niedriger — mehr als 4 Vorgabesteine machen auf 9×9 wenig Sinn.
-
-<table>
-<thead><tr><th>GoR-Differenz</th><th>Vorgabe</th><th>Komi</th></tr></thead>
-<tbody>
-<tr><td>0–70</td><td>0 Steine</td><td>6,5</td></tr>
-<tr><td>70–140</td><td>0 Steine</td><td>0,5</td></tr>
-<tr><td>140–210</td><td>0 Steine</td><td><strong>−5,5 (Rückkomi)</strong></td></tr>
-<tr><td>210–280</td><td>2 Steine</td><td>0,5</td></tr>
-<tr><td>280–350</td><td>3 Steine</td><td>0,5</td></tr>
-<tr><td>350–420</td><td>4 Steine</td><td>0,5</td></tr>
-<tr><td>≥ 420</td><td>4 Steine</td><td><strong>−5,5 (Rückkomi)</strong></td></tr>
-</tbody>
-</table>
+Auf **9×9** trägt Komi damit rund die ersten sechs Ränge — Vorgabesteine erscheinen erst bei großen Lücken. Auf **19×19** liegt praktisch ein Stein pro Rang an, Komi feintunt nur. Das ist kein eigenes System, sondern die OGS-Bewertungsformel rückwärts gelesen; Empfehlung und Rating stammen aus *einer* Quelle.
 
 ## Im Tablet-Wizard
 
-Der Wizard kennt zwei Wege:
+1. **Vorgabe berechnen** — Spieler 1 → Spieler 2 → Brett → fertige Vorgabe.
+2. **Spiel eintragen** — derselbe Weg, plus Ergebnis.
 
-1. **Vorgabe berechnen** — Spieler 1 → Spieler 2 → Brett → fertige Vorgabe wird angezeigt.
-2. **Spiel eintragen** — derselbe Weg, plus Ergebnis und Bestätigung.
-
-Vor dem Eintragen können Vorgabe und Komi noch geändert werden, falls ihr während der Partie improvisiert habt (z.B. weil Schwarz die Vorgabe doch nicht alle plazieren wollte).
-
-## Rating-Bonus aus der Vorgabe
-
-Wenn Schwarz $h$ Vorgabesteine bekommt, behandelt das EGF-System Schwarz für die Erwartungs­berechnung so, als wäre seine GoR um
-
-$$
-100 \cdot (h - 0{,}5)\ \text{GoR}
-$$
-
-höher (siehe [Calculator.java in barcicki/GorCalculator](https://github.com/barcicki/GorCalculator/blob/master/app/src/main/java/com/barcicki/gorcalculator/core/Calculator.java) sowie [skillratings::egf](https://docs.rs/skillratings/latest/src/skillratings/egf.rs.html)). Auf 19×19 ist also 1 Stein immer 100 GoR wert.
-
-Für kleinere Bretter macht das EGF-System keine Aussage; Go-Liga verwendet für die *Rating-Berechnung* (nicht für die Empfehlung!) deshalb absichtlich konservative Per-Stein-Werte:
-
-- 9×9: 50 GoR pro Stein
-- 13×13: 70 GoR pro Stein
-- 19×19: 100 GoR pro Stein (EGF-Konvention)
-
-Diese Werte spiegeln *wie viel Vertrauen* wir in den Vorgabe-Ausgleich haben — auf kleinen Brettern entscheidet ein einziger übersehener Zug das ganze Spiel, der Stein-Vorsprung gibt also weniger statistische Sicherheit.
-
-**Wichtig**: Komi (auch Rückkomi) fließt *nicht* in den Rating-Bonus ein — nur die platzierten Steine. Komi-Anpassungen sind reine Spielausgleich-Sache und ändern die GoR nicht.
-
-Der Bonus wird außerdem nur angewendet, wenn Schwarz tatsächlich der schwächere Spieler ist. Spielt versehentlich der Stärkere Schwarz mit Vorgabe, wird der Bonus auf 0 gesetzt — sonst würde der Stärkere doppelt belohnt.
+Vorgabe und Komi lassen sich vor dem Eintragen noch ändern, falls während der Partie improvisiert wurde — das Rating wertet immer das *tatsächlich gespielte* Setup.
