@@ -182,6 +182,91 @@ func TestPlayerProfileShowsRatingGrid(t *testing.T) {
 	}
 }
 
+// #20 — a user who administers exactly one team skips the start page.
+func TestSingleTeamRedirectsIntoGroup(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroupWithSlug(ctx, "solo", "Solo")
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	_ = svc.Store.AddGroupAdmin(ctx, u.ID, g.ID)
+
+	c := loggedInClient(t, ts, signer, u.ID)
+	resp, err := c.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/g/solo" {
+		t.Errorf("got %d -> %q, want 302 -> /g/solo", resp.StatusCode, resp.Header.Get("Location"))
+	}
+}
+
+// #21 — the manual is reachable from the main navigation on every page.
+func TestHandbuchLinkInNav(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroupWithSlug(ctx, "g", "G")
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	_ = svc.Store.AddGroupAdmin(ctx, u.ID, g.ID)
+
+	c := loggedInClient(t, ts, signer, u.ID)
+	resp, err := c.Get(ts.URL + "/g/g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), `href="/docs"`) || !strings.Contains(string(body), "Handbuch") {
+		t.Errorf("main nav is missing the Handbuch link")
+	}
+}
+
+// #18/#19 — recording a game redirects to a result page that shows the
+// points change and links to the league ranking.
+func TestGameCommitShowsResultPage(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroupWithSlug(ctx, "g", "G")
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	_ = svc.Store.AddGroupAdmin(ctx, u.ID, g.ID)
+	pia, _ := svc.Store.CreatePlayer(ctx, g.ID, "Pia", 900)
+	tom, _ := svc.Store.CreatePlayer(ctx, g.ID, "Tom", 700)
+
+	c := loggedInClient(t, ts, signer, u.ID)
+	form := url.Values{
+		"black":    {strconv.FormatInt(pia.ID, 10)},
+		"white":    {strconv.FormatInt(tom.ID, 10)},
+		"board":    {"9"},
+		"handicap": {"0"},
+		"komi":     {"0.5"},
+		"winner":   {"black"},
+	}
+	resp, err := c.PostForm(ts.URL+"/g/g/play/g/commit", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	loc := resp.Header.Get("Location")
+	if resp.StatusCode != http.StatusFound || !strings.HasPrefix(loc, "/g/g/play/g/done?game=") {
+		t.Fatalf("commit -> %d %q, want 302 -> /g/g/play/g/done", resp.StatusCode, loc)
+	}
+
+	resp2, err := c.Get(ts.URL + loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		t.Fatalf("result page status %d: %s", resp2.StatusCode, body)
+	}
+	for _, want := range []string{"Pia", "Tom", "Spiel eingetragen", "Zur Rangliste", `href="/g/g"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("result page missing %q", want)
+		}
+	}
+}
+
 func TestWebHasNoWriteEndpoints(t *testing.T) {
 	// Sanity check: the web UI is read-only, all the old POST routes
 	// have been removed. The mux should respond 405 (method not allowed)
