@@ -7,121 +7,110 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: levino/go-ranking
 
-# Build-only workflow. It builds and pushes the multi-arch image to GHCR and
-# has NO connection to the cluster (no kubectl, no cluster auth, no git push
-# back into the deploy overlay). Rolling the go-liga deployment forward is
-# handled entirely by Flux image-automation (ImageRepository / ImagePolicy /
-# ImageUpdateAutomation in the levino/server-config repo): Flux picks up the
-# newest build-timestamp tag and commits it into
-# deploy/overlays/production/kustomization.yaml via the $imagepolicy setter.
+# Variant B (GitOps self-deploy, mirrors levinkeller.de):
+#   1. Build the image on NATIVE per-arch runners (never QEMU — a QEMU
+#      amd64-only image is what caused the historical go-liga
+#      ImagePullBackOff on this arm64 cluster).
+#   2. Merge the per-arch builds into one multi-arch manifest in GHCR.
+#   3. Bump the image tag in deploy/overlays/production/kustomization.yaml
+#      and git-commit it back to main. Flux (Kustomization go-liga)
+#      reconciles the overlay onto the cluster.
+# There is NO cluster access here: no kubectl, no cluster auth, no
+# id-token. The commit message carries "[skip ci]" so the bump commit on
+# main does NOT re-trigger this workflow (loop prevention).
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  # Compute one shared, sortable build-timestamp tag (UTC YYYYMMDDHHmmss) so
-  # both arch builds publish under the same value and the Flux ImagePolicy
-  # (filterTags: ^\d{14}$, alphabetical asc) can deterministically pick it.
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      build_tag: ${{ steps.tag.outputs.build_tag }}
-    steps:
-      - id: tag
-        run: echo "build_tag=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
-
-  # Build each architecture on its OWN native runner — never QEMU /
-  # cross-emulation. The previous QEMU build is what produced the amd64-only
-  # image that caused the go-liga ImagePullBackOff on this arm64 cluster.
-  # Each runner builds + pushes its platform by digest (untagged).
-  build:
-    needs: prepare
-    permissions:
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-24.04
-            arch: amd64
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
+  build-amd64:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push by digest
-        id: build
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push amd64
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-amd64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-amd64,mode=max
 
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest='${{ steps.build.outputs.digest }}'
-          touch "/tmp/digests/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ matrix.arch }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  # Assemble the per-arch digests into one multi-arch manifest list and
-  # publish the shared tags: build timestamp (for Flux), git sha, and latest.
-  merge:
-    needs: [prepare, build]
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
     steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: digest-*
-          merge-multiple: true
+      - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ needs.prepare.outputs.build_tag }}
-            type=sha,prefix=,format=long
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Create manifest list and push
-        working-directory: /tmp/digests
+      - name: Build and push arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-arm64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-arm64,mode=max
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build-amd64, build-arm64]
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create and push multi-arch manifest
         run: |
           docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "${REGISTRY}/${IMAGE_NAME}@sha256:%s " *)
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64
 
-      - name: Inspect
+      - name: Update image tag in kustomization
         run: |
-          docker buildx imagetools inspect \
-            "${REGISTRY}/${IMAGE_NAME}:${{ needs.prepare.outputs.build_tag }}"
+          cd deploy/overlays/production
+          kustomize edit set image ghcr.io/levino/go-ranking=ghcr.io/levino/go-ranking:${{ github.sha }}
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/overlays/production/kustomization.yaml
+          git diff --staged --quiet || git commit -m "chore(deploy): bump image to ${GITHUB_SHA::12} [skip ci]"
+          git push

@@ -5,8 +5,9 @@ resources:
   - ../../base
   - sealed-secret.yaml
 images:
+  # The app's own deploy workflow runs `kustomize edit set image` here and
+  # commits the bump back to main; Flux (Kustomization go-liga) reconciles
+  # it onto the cluster. No CI->cluster connection, no image-automation CRDs.
   - name: ghcr.io/levino/go-ranking
-    # Flux ImageUpdateAutomation rewrites this tag from ImagePolicy
-    # `flux-system:go-liga` (the newest ^\d{14}$ build timestamp). CI only
-    # builds + pushes; it never writes to the cluster or this file.
-    newTag: "5a85c0b54fd63ba293d13b1d085bb1d4577c579d" # {"$imagepolicy": "flux-system:go-liga:tag"}
+    newName: ghcr.io/levino/go-ranking
+    newTag: "5a85c0b54fd63ba293d13b1d085bb1d4577c579d"
