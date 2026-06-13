@@ -7,79 +7,110 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: levino/go-ranking
+
+# Variant B (GitOps self-deploy, mirrors levinkeller.de):
+#   1. Build the image on NATIVE per-arch runners (never QEMU — a QEMU
+#      amd64-only image is what caused the historical go-liga
+#      ImagePullBackOff on this arm64 cluster).
+#   2. Merge the per-arch builds into one multi-arch manifest in GHCR.
+#   3. Bump the image tag in deploy/overlays/production/kustomization.yaml
+#      and git-commit it back to main. Flux (Kustomization go-liga)
+#      reconciles the overlay onto the cluster.
+# There is NO cluster access here: no kubectl, no cluster auth, no
+# id-token. The commit message carries "[skip ci]" so the bump commit on
+# main does NOT re-trigger this workflow (loop prevention).
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build-and-publish:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write   # commit the bumped image tag back to main
-      packages: write
+  build-amd64:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,prefix=,format=long
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push amd64
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-amd64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-amd64,mode=max
 
-      # GitOps: bump the image tag in the production overlay so Flux picks
-      # up the new build on its next reconcile (no CI→cluster connection).
-      - name: Update image tag in overlay
-        env:
-          IMAGE_TAG: ${{ github.sha }}
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-arm64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-arm64,mode=max
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build-amd64, build-arm64]
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create and push multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-arm64
+
+      - name: Update image tag in kustomization
         run: |
           cd deploy/overlays/production
-          # Find-and-replace the newTag line under the matching image.
-          python3 - <<'PY'
-          import os, re, pathlib
-          p = pathlib.Path("kustomization.yaml")
-          text = p.read_text()
-          tag = os.environ["IMAGE_TAG"]
-          new = re.sub(
-              r"(- name: ghcr\.io/levino/go-ranking\s+newTag: )\S+",
-              rf"\g<1>{tag}",
-              text,
-          )
-          if new == text:
-              raise SystemExit("kustomization.yaml unchanged — pattern mismatch")
-          p.write_text(new)
-          PY
-          git --no-pager diff kustomization.yaml
+          kustomize edit set image ghcr.io/levino/go-ranking=ghcr.io/levino/go-ranking:${{ github.sha }}
 
-      - name: Commit and push image bump
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet deploy/overlays/production/kustomization.yaml; then
-            echo "no change to commit"
-            exit 0
-          fi
           git add deploy/overlays/production/kustomization.yaml
-          git commit -m "chore(deploy): bump image to ${GITHUB_SHA::12}
-
-          [skip ci]"
-          git push origin HEAD:main
+          git diff --staged --quiet || git commit -m "chore(deploy): bump image to ${GITHUB_SHA::12} [skip ci]"
+          git push
