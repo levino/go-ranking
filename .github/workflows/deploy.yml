@@ -9,16 +9,93 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# Build-only workflow. It builds and pushes the multi-arch image to GHCR and
+# has NO connection to the cluster (no kubectl, no cluster auth, no git push
+# back into the deploy overlay). Rolling the go-liga deployment forward is
+# handled entirely by Flux image-automation (ImageRepository / ImagePolicy /
+# ImageUpdateAutomation in the levino/server-config repo): Flux picks up the
+# newest build-timestamp tag and commits it into
+# deploy/overlays/production/kustomization.yaml via the $imagepolicy setter.
 jobs:
-  build-and-publish:
+  # Compute one shared, sortable build-timestamp tag (UTC YYYYMMDDHHmmss) so
+  # both arch builds publish under the same value and the Flux ImagePolicy
+  # (filterTags: ^\d{14}$, alphabetical asc) can deterministically pick it.
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      build_tag: ${{ steps.tag.outputs.build_tag }}
+    steps:
+      - id: tag
+        run: echo "build_tag=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+  # Build each architecture on its OWN native runner — never QEMU /
+  # cross-emulation. The previous QEMU build is what produced the amd64-only
+  # image that caused the go-liga ImagePullBackOff on this arm64 cluster.
+  # Each runner builds + pushes its platform by digest (untagged).
+  build:
+    needs: prepare
     permissions:
-      contents: write   # commit the bumped image tag back to main
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest='${{ steps.build.outputs.digest }}'
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Assemble the per-arch digests into one multi-arch manifest list and
+  # publish the shared tags: build timestamp (for Flux), git sha, and latest.
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
 
       - uses: docker/setup-buildx-action@v3
 
@@ -33,53 +110,18 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=raw,value=${{ needs.prepare.outputs.build_tag }}
             type=sha,prefix=,format=long
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # GitOps: bump the image tag in the production overlay so Flux picks
-      # up the new build on its next reconcile (no CI→cluster connection).
-      - name: Update image tag in overlay
-        env:
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
         run: |
-          cd deploy/overlays/production
-          # Find-and-replace the newTag line under the matching image.
-          python3 - <<'PY'
-          import os, re, pathlib
-          p = pathlib.Path("kustomization.yaml")
-          text = p.read_text()
-          tag = os.environ["IMAGE_TAG"]
-          new = re.sub(
-              r"(- name: ghcr\.io/levino/go-ranking\s+newTag: )\S+",
-              rf"\g<1>{tag}",
-              text,
-          )
-          if new == text:
-              raise SystemExit("kustomization.yaml unchanged — pattern mismatch")
-          p.write_text(new)
-          PY
-          git --no-pager diff kustomization.yaml
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${REGISTRY}/${IMAGE_NAME}@sha256:%s " *)
 
-      - name: Commit and push image bump
+      - name: Inspect
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet deploy/overlays/production/kustomization.yaml; then
-            echo "no change to commit"
-            exit 0
-          fi
-          git add deploy/overlays/production/kustomization.yaml
-          git commit -m "chore(deploy): bump image to ${GITHUB_SHA::12}
-
-          [skip ci]"
-          git push origin HEAD:main
+          docker buildx imagetools inspect \
+            "${REGISTRY}/${IMAGE_NAME}:${{ needs.prepare.outputs.build_tag }}"
