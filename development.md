@@ -4,12 +4,11 @@ Technical reference for running, testing, and deploying go-liga.
 
 The whole stack is one Go binary plus a SQLite file:
 
-| Layer            | Endpoint                                   |
-|------------------|--------------------------------------------|
-| Web UI           | `/`, `/login`, `/g/{slug}/...`             |
-| Per-session PDFs | `/g/{slug}/sessions/{pass}/matrix.pdf`     |
-|                  | `/g/{slug}/sessions/{pass}/scorecard.pdf`  |
-| MCP API          | `/mcp` (JSON-RPC 2.0; Accept SSE optional) |
+| Layer   | Endpoint                                                  |
+|---------|----------------------------------------------------------|
+| Web UI  | `/`, `/login`, `/settings`, `/docs`, `/g/{slug}/...`      |
+| MCP API | `/mcp` (JSON-RPC 2.0; Accept SSE optional)                |
+| OAuth   | `/.well-known/oauth-*`, `/oauth/{register,authorize,token}` |
 
 ## Local development
 
@@ -36,15 +35,17 @@ a temporary SQLite database and exercise both the web UI and the MCP API.
 
 ## Layout
 
-- `internal/rating` — EGF GoR formula, handicap tables, kyu/dan parsing.
+- `internal/rating` — OGS/Glicko-2 rating math, handicap & komi model
+  (ported from online-go/goratings), kyu/dan/GoR formatting.
 - `internal/store` — SQLite-backed persistence; embeds the schema.
-- `internal/service` — domain orchestration (sessions, recording games).
-- `internal/auth` — argon2id password hashing, signed session cookies.
-- `internal/passphrase` — adjective-noun session passphrase generator.
-- `internal/pdfgen` — handicap matrix and score-card PDFs.
+- `internal/service` — domain orchestration (handicap recommendations,
+  recording games, full-history rating recompute).
+- `internal/auth` — OIDC login, HMAC-signed session cookies, MCP JWTs.
 - `internal/web` — HTML UI (`html/template`), embedded templates.
 - `internal/i18n` — UI translation catalog and localizer (German/English).
-- `internal/mcp` — MCP HTTP/SSE server (Claude.ai-compatible).
+- `internal/docs` — embedded Markdown handbook (German + English).
+- `internal/mcp` — MCP HTTP/SSE server (Claude.ai-compatible) plus the
+  OAuth authorization-server endpoints.
 - `internal/e2e` — full-stack tests.
 - `deploy/` — Kubernetes manifests for K3s.
 - `.github/workflows/` — CI and CD pipelines.
