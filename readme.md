@@ -1,77 +1,56 @@
 # go-liga
 
-A small management system for school Go leagues. Children play with real
-stones at school; results are written on paper and entered into the
-system once a week. The service maintains a running EGF Go Rating (GoR)
-for every player and prints the recommended handicap for every pairing.
+**Run a real Go league at your school — with real stones, real kids, and
+ratings that actually mean something.**
 
-The whole stack is one Go binary plus a SQLite file:
+Children play Go at school with real stones on real boards. Results get
+scribbled on paper. Once a week, someone types them in — and go-liga does
+the rest. It keeps a proper, tournament-grade rating for every child,
+tells you exactly how many handicap stones each pairing needs for a fair
+game, and prints the paperwork so the next session runs itself.
 
-| Layer            | Endpoint                                   |
-|------------------|--------------------------------------------|
-| Web UI           | `/`, `/login`, `/g/{slug}/...`             |
-| Per-session PDFs | `/g/{slug}/sessions/{pass}/matrix.pdf`     |
-|                  | `/g/{slug}/sessions/{pass}/scorecard.pdf`  |
-| MCP API          | `/mcp` (JSON-RPC 2.0; Accept SSE optional) |
+## Why it's cool
 
-## Local development
+🏆 **Real ratings, not made-up numbers.** Every player carries an official
+EGF Go Rating (GoR) — the same system used by European Go tournaments. Win
+against a stronger opponent and your rating jumps; the maths is honest and
+the leaderboard is real.
 
-```bash
-export GO_LIGA_SIGNING_KEY=$(head -c 32 /dev/urandom | xxd -p -c 64)
-export GO_LIGA_OIDC_ISSUER=https://id.levinkeller.de
-export GO_LIGA_OIDC_CLIENT_ID=...           # from Zitadel
-export GO_LIGA_OIDC_CLIENT_SECRET=...        # from Zitadel
-export GO_LIGA_OIDC_REDIRECT_URL=http://localhost:8080/auth/callback
+⚖️ **Fair games, every time.** go-liga reads the gap between two players and
+tells you the handicap and komi that make the game a genuine contest — so a
+beginner and a club veteran can sit down and both have a chance. No more
+lopsided blowouts.
 
-go run ./cmd/server
-```
+📄 **Paper-friendly by design.** Built for the way schools actually work.
+Print a handicap matrix so kids can find their own pairings, hand out
+score-cards for the week, collect them, and type the results in later. The
+computer stays in the cupboard; the stones stay on the table.
 
-Then open <http://localhost:8080/> and authenticate via id.levinkeller.de.
+📈 **A living leaderboard.** Watch the ranking shift week by week as the
+league plays on. Players climb, rivalries form, and everyone can see
+exactly where they stand.
 
-## Tests
+🤖 **Talk to your league.** go-liga speaks MCP, so you can plug it straight
+into Claude and friends. Ask "who's top of the league?", "record that Mia
+beat Tom", or "what handicap should these two play?" — all in plain
+language, no forms required.
 
-```bash
-go test ./... -race
-```
+🔢 **Multiple groups, one place.** Run separate leagues for different
+classes, clubs, or age groups side by side, each with its own players and
+its own ranking.
 
-End-to-end tests in `internal/e2e` spin up the full HTTP server against
-a temporary SQLite database and exercise both the web UI and the MCP API.
+## How it works
 
-## Layout
+1. Kids play Go at school with real boards and stones.
+2. Results land on paper.
+3. Once a week, you enter them — in the web app or just by asking Claude.
+4. go-liga updates every rating, recalculates fair handicaps, and prints
+   the matrix and score-cards for next time.
 
-- `internal/rating` — EGF GoR formula, handicap tables, kyu/dan parsing.
-- `internal/store` — SQLite-backed persistence; embeds the schema.
-- `internal/service` — domain orchestration (sessions, recording games).
-- `internal/auth` — argon2id password hashing, signed session cookies.
-- `internal/passphrase` — adjective-noun session passphrase generator.
-- `internal/pdfgen` — handicap matrix and score-card PDFs.
-- `internal/web` — HTML UI (`html/template`), embedded templates.
-- `internal/mcp` — MCP HTTP/SSE server (Claude.ai-compatible).
-- `internal/e2e` — full-stack tests.
-- `deploy/` — Kubernetes manifests for K3s.
-- `.github/workflows/` — CI and CD pipelines.
+That's the whole loop. Set it up once and the league more or less runs
+itself.
 
-## Deployment
+## Want to run or hack on it?
 
-The `deploy/` directory contains Kubernetes manifests for K3s.  After
-filling in `deploy/secret.yaml` (signing key, MCP token, bootstrap
-admin):
-
-```bash
-kubectl apply -k deploy/
-```
-
-`.github/workflows/deploy.yml` builds the container image, pushes it to
-GHCR, and triggers `kubectl rollout` against the cluster using GitHub
-OIDC for authentication (no static kubeconfig).
-
-## Configuration
-
-| Variable                       | Purpose                                     |
-|--------------------------------|---------------------------------------------|
-| `GO_LIGA_SIGNING_KEY`          | HMAC key for session cookies (32 bytes hex) |
-| `GO_LIGA_DB`                   | SQLite path (default `go-liga.db`)          |
-| `GO_LIGA_LISTEN`               | HTTP listen address (default `:8080`)       |
-| `GO_LIGA_OIDC_ISSUER`          | OIDC issuer (e.g. `https://id.levinkeller.de`) |
-| `GO_LIGA_OIDC_CLIENT_ID` / `_SECRET` | OIDC client credentials (web app) |
-| `GO_LIGA_OIDC_REDIRECT_URL`    | Web app OAuth callback URL                  |
+Setup, configuration, deployment and the technical layout live in
+[development.md](development.md).
