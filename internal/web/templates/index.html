@@ -44,9 +44,9 @@
 }
 </style>
 <h1>Go-Liga</h1>
-<p class="muted">Angemeldet als {{if .User.Name}}{{.User.Name}}{{else}}{{.User.Email}}{{end}}.</p>
+<p class="muted">{{.T "index.signed_in_as" (or .User.Name .User.Email)}}</p>
 
-<h2>Deine Gruppen</h2>
+<h2>{{.T "index.your_groups"}}</h2>
 {{if .Groups}}
 <ul class="group-list">
 {{range .Groups}}
@@ -54,22 +54,22 @@
     <div class="group-meta">
       <a href="/g/{{.Slug}}">{{.Name}}</a><span class="slug">({{.Slug}})</span>
     </div>
-    <a class="btn" href="/g/{{.Slug}}/play">Spielen</a>
+    <a class="btn" href="/g/{{.Slug}}/play">{{$.T "action.play"}}</a>
   </li>
 {{end}}
 </ul>
 {{else}}
-<p class="muted">Du administrierst noch keine Gruppe. Lege eine über den MCP-Server an (Tool <code>create_group</code>).</p>
+<p class="muted">{{.TH "index.no_groups_html"}}</p>
 {{end}}
 
-<p style="margin-top:1.5rem"><a class="btn ghost" href="/docs">📖 Handbuch lesen</a></p>
+<p style="margin-top:1.5rem"><a class="btn ghost" href="/docs">{{.T "index.read_handbook"}}</a></p>
 
-<h2>MCP-Server</h2>
-<p class="muted">Verwaltungstool für Claude.ai. URL:</p>
+<h2>{{.T "index.mcp_heading"}}</h2>
+<p class="muted">{{.T "index.mcp_desc"}}</p>
 <div class="mcp-row">
   <code id="mcp-url">{{.MCPURL}}</code>
-  <button class="btn ghost" type="button" onclick="navigator.clipboard.writeText(document.getElementById('mcp-url').innerText)">kopieren</button>
+  <button class="btn ghost" type="button" onclick="navigator.clipboard.writeText(document.getElementById('mcp-url').innerText)">{{.T "action.copy"}}</button>
 </div>
-<p class="muted" style="margin-top:.8rem">Auth: OAuth/OIDC gegen id.levinkeller.de — Claude.ai entdeckt den Auth-Server selbst, beim ersten Verbinden öffnet sich ein Browser-Fenster.</p>
+<p class="muted" style="margin-top:.8rem">{{.T "index.mcp_auth"}}</p>
 {{end}}
 {{template "layout" .}}

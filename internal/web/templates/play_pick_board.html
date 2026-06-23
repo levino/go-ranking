@@ -70,22 +70,22 @@
     <a class="board-tile" data-size="9" href="{{call .NextBoard 9}}">
       <div class="board-glyph"></div>
       9×9
-      <small>schnelle Partie</small>
+      <small>{{.T "board.fast"}}</small>
     </a>
     <a class="board-tile" data-size="13" href="{{call .NextBoard 13}}">
       <div class="board-glyph"></div>
       13×13
-      <small>mittel</small>
+      <small>{{.T "board.medium"}}</small>
     </a>
     <a class="board-tile" data-size="19" href="{{call .NextBoard 19}}">
       <div class="board-glyph"></div>
       19×19
-      <small>volles Brett</small>
+      <small>{{.T "board.full"}}</small>
     </a>
   </div>
 
   <div class="wizard-actions">
-    <a class="btn ghost" href="{{.Wizard.BackPath}}">← Zurück</a>
+    <a class="btn ghost" href="{{.Wizard.BackPath}}">{{.T "action.back"}}</a>
   </div>
 </div>
 {{end}}

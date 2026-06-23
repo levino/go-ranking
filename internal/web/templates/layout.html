@@ -1,5 +1,5 @@
 {{define "layout"}}<!doctype html>
-<html lang="de">
+<html lang="{{.Lang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -75,6 +75,23 @@ header.site .links {
 }
 header.site .links a { color: var(--muted); }
 header.site .links a:hover { color: var(--ink); }
+.langswitch { display: inline-flex; gap: .15rem; }
+.langswitch form { display: inline; margin: 0; }
+.langswitch button {
+  font-family: inherit;
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+  padding: .25rem .45rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper-2);
+  color: var(--muted);
+  cursor: pointer;
+  min-height: 0;
+}
+.langswitch button:hover { color: var(--ink); border-color: var(--ink); }
+.langswitch button.active { background: var(--ink); color: #fff; border-color: var(--ink); cursor: default; }
 main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.2rem 5rem; }
 table { border-collapse: collapse; width: 100%; background: var(--paper-2); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
 th, td { padding: .55rem .8rem; border-bottom: 1px solid var(--line); text-align: left; }
@@ -239,14 +256,24 @@ code {
     <a href="/" class="brand">⬤ Go-Liga</a>
   </div>
   <div class="links">
-    <a href="/docs">📖 Handbuch</a>
+    <a href="/docs">{{.T "nav.handbook"}}</a>
+    <span class="langswitch">
+      {{range .Languages}}
+      <form action="/settings/language" method="post">
+        <input type="hidden" name="lang" value="{{.Code}}">
+        <input type="hidden" name="return_to" value="{{$.Path}}">
+        <button type="submit" class="{{if .Active}}active{{end}}"{{if .Active}} aria-current="true"{{end}}>{{upper .Code}}</button>
+      </form>
+      {{end}}
+    </span>
     {{if .User}}
+      <a href="/settings">{{.T "nav.settings"}}</a>
       <span class="muted">{{if .User.Name}}{{.User.Name}}{{else}}{{.User.Email}}{{end}}</span>
       <form action="/logout" method="post" style="display:inline">
-        <button class="btn ghost" type="submit">Logout</button>
+        <button class="btn ghost" type="submit">{{.T "action.logout"}}</button>
       </form>
     {{else}}
-      <a class="btn" href="/auth/start">Anmelden</a>
+      <a class="btn" href="/auth/start">{{.T "action.login"}}</a>
     {{end}}
   </div>
 </header>

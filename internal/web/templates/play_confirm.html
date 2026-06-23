@@ -46,24 +46,24 @@
 </style>
 
 <div class="confirm-shell">
-  <h1>Wirklich eintragen?</h1>
-  <p class="sub">Schau nochmal kurz drauf.</p>
+  <h1>{{.T "confirm.title"}}</h1>
+  <p class="sub">{{.T "confirm.sub"}}</p>
 
   <dl class="confirm-summary">
-    <dt>Schwarz</dt>
+    <dt>{{.T "color.black"}}</dt>
     <dd>{{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}</dd>
-    <dt>Weiß</dt>
+    <dt>{{.T "color.white"}}</dt>
     <dd>{{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}</dd>
-    <dt>Brett</dt>
+    <dt>{{.T "th.board"}}</dt>
     <dd>{{.Recommendation.Board}}</dd>
-    <dt>Vorgabe</dt>
-    <dd>{{.Recommendation.Stones}} Steine · {{komiText .Recommendation.Komi}}</dd>
-    <dt>Sieger</dt>
+    <dt>{{.T "th.handicap"}}</dt>
+    <dd>{{.Recommendation.Stones}} {{.T "result.stones"}} · {{.KomiText .Recommendation.Komi}}</dd>
+    <dt>{{.T "th.winner"}}</dt>
     <dd>
       {{if eq .Flash "black"}}
-      <span class="winner black"><span class="stone"></span> Schwarz — {{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}</span>
+      <span class="winner black"><span class="stone"></span> {{.T "color.black"}} — {{playerName .PlayerNames .Recommendation.BlackPlayer.ID}}</span>
       {{else}}
-      <span class="winner white"><span class="stone"></span> Weiß — {{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}</span>
+      <span class="winner white"><span class="stone"></span> {{.T "color.white"}} — {{playerName .PlayerNames .Recommendation.WhitePlayer.ID}}</span>
       {{end}}
     </dd>
   </dl>
@@ -75,8 +75,8 @@
     <input type="hidden" name="handicap" value="{{.Recommendation.Stones}}">
     <input type="hidden" name="komi"     value="{{printf "%.1f" .Recommendation.Komi}}">
     <input type="hidden" name="winner"   value="{{.Flash}}">
-    <button class="btn huge success" type="submit">Ja, eintragen</button>
-    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play">Abbrechen</a>
+    <button class="btn huge success" type="submit">{{.T "confirm.yes"}}</button>
+    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play">{{.T "action.cancel"}}</a>
   </form>
 </div>
 {{end}}

@@ -1,0 +1,48 @@
+{{define "content"}}
+<style>
+.settings-card {
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.4rem 1.6rem;
+  max-width: 520px;
+}
+.lang-options { display: flex; flex-direction: column; gap: .6rem; margin: 1rem 0 1.4rem; }
+.lang-option {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: .8rem 1rem;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.lang-option:hover { border-color: var(--ink); }
+.lang-option input { accent-color: var(--ink); width: 1.1rem; height: 1.1rem; }
+</style>
+
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · {{.T "settings.title"}}</nav>
+<h1>{{.T "settings.title"}}</h1>
+
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+
+<div class="settings-card">
+  <h2>{{.T "settings.language"}}</h2>
+  <p class="muted">{{.T "settings.language_desc"}}</p>
+  <form action="/settings/language" method="post">
+    <input type="hidden" name="return_to" value="/settings?saved=1">
+    <div class="lang-options">
+      {{range .Languages}}
+      <label class="lang-option">
+        <input type="radio" name="lang" value="{{.Code}}"{{if .Active}} checked{{end}}>
+        <span>{{.Name}}</span>
+      </label>
+      {{end}}
+    </div>
+    <button class="btn" type="submit">{{$.T "action.save"}}</button>
+  </form>
+</div>
+{{end}}
+{{template "layout" .}}

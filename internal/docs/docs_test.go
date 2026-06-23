@@ -124,3 +124,31 @@ func TestRenderPipeTableLinkInCell(t *testing.T) {
 		t.Errorf("link inside table cell not rendered: %s", got)
 	}
 }
+
+func TestRenderLangEnglish(t *testing.T) {
+	html := RenderLang("en", "overview")
+	if html == "" {
+		t.Fatal("english overview should render")
+	}
+	if !strings.Contains(html, "Overview") {
+		t.Errorf("english overview missing English heading: %s", html)
+	}
+	if strings.Contains(html, "Überblick") {
+		t.Errorf("english overview still shows German heading")
+	}
+}
+
+func TestListLangFallsBackToDefault(t *testing.T) {
+	// An unknown language yields the same chapters/slugs as the default,
+	// so navigation stays complete.
+	de := ListLang("de")
+	xx := ListLang("xx")
+	if len(de) != len(xx) || len(de) == 0 {
+		t.Fatalf("expected same page count, got de=%d xx=%d", len(de), len(xx))
+	}
+	for i := range de {
+		if de[i].Slug != xx[i].Slug {
+			t.Errorf("slug mismatch at %d: %q vs %q", i, de[i].Slug, xx[i].Slug)
+		}
+	}
+}

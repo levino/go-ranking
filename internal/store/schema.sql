@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     oidc_subject  TEXT NOT NULL UNIQUE,
     email         TEXT,
     name          TEXT,
+    language      TEXT NOT NULL DEFAULT 'de',
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);

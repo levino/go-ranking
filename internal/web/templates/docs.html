@@ -105,11 +105,11 @@
 .docs-content strong { font-weight: 700; }
 </style>
 
-<nav class="breadcrumb"><a href="/">Start</a> · Handbuch</nav>
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · {{.T "docs.heading"}}</nav>
 
 <div class="docs-shell">
   <nav class="docs-nav">
-    <h4>Handbuch</h4>
+    <h4>{{.T "docs.heading"}}</h4>
     <ul>
       {{range .DocsList}}
         <li><a href="/docs/{{.Slug}}"{{if eq .Slug $.DocCurrent}} class="active"{{end}}>{{.Title}}</a></li>

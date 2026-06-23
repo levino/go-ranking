@@ -44,6 +44,9 @@ func Open(path string) (*Store, error) {
 	if err := s.migrateRatings(context.Background()); err != nil {
 		return nil, fmt.Errorf("migrate ratings: %w", err)
 	}
+	if err := s.migrateUserLanguage(context.Background()); err != nil {
+		return nil, fmt.Errorf("migrate user language: %w", err)
+	}
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
@@ -238,6 +241,37 @@ func (s *Store) migrate(ctx context.Context) error {
 	return tx.Commit()
 }
 
+// migrateUserLanguage adds the users.language column to databases that
+// predate the i18n feature. A no-op on a fresh DB (schema.sql creates
+// the column) or once already applied. Idempotent.
+func (s *Store) migrateUserLanguage(ctx context.Context) error {
+	var usersExists, hasLanguage bool
+	rows, err := s.DB.QueryContext(ctx, "PRAGMA table_info(users)")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		usersExists = true
+		if name == "language" {
+			hasLanguage = true
+		}
+	}
+	rows.Close()
+	if !usersExists || hasLanguage {
+		return nil
+	}
+	_, err = s.DB.ExecContext(ctx,
+		`ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'de'`)
+	return err
+}
+
 func (s *Store) Close() error { return s.DB.Close() }
 
 // ---- Domain types --------------------------------------------------------
@@ -301,6 +335,7 @@ type User struct {
 	OIDCSubject string
 	Email       string
 	Name        string
+	Language    string // UI language preference ("de" / "en")
 	CreatedAt   time.Time
 }
 
@@ -673,8 +708,8 @@ func (s *Store) UpsertUserByOIDC(ctx context.Context, subject, email, name strin
 	u := &User{}
 	var created string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT id,oidc_subject,email,name,created_at FROM users WHERE oidc_subject=?`, subject).
-		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created); err != nil {
+		`SELECT id,oidc_subject,email,name,language,created_at FROM users WHERE oidc_subject=?`, subject).
+		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &u.Language, &created); err != nil {
 		return nil, err
 	}
 	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
@@ -688,8 +723,8 @@ func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
 	u := &User{}
 	var created string
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,oidc_subject,email,name,created_at FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created)
+		`SELECT id,oidc_subject,email,name,language,created_at FROM users WHERE id=?`, id).
+		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &u.Language, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -700,12 +735,19 @@ func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
 	return u, nil
 }
 
+// UpdateUserLanguage persists a user's UI language preference.
+func (s *Store) UpdateUserLanguage(ctx context.Context, id int64, lang string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE users SET language=? WHERE id=?`, lang, id)
+	return err
+}
+
 func (s *Store) UserByOIDC(ctx context.Context, subject string) (*User, error) {
 	u := &User{}
 	var created string
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,oidc_subject,email,name,created_at FROM users WHERE oidc_subject=?`, subject).
-		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created)
+		`SELECT id,oidc_subject,email,name,language,created_at FROM users WHERE oidc_subject=?`, subject).
+		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &u.Language, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -720,8 +762,8 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (*User, error) {
 	u := &User{}
 	var created string
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,oidc_subject,email,name,created_at FROM users WHERE email=?`, email).
-		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &created)
+		`SELECT id,oidc_subject,email,name,language,created_at FROM users WHERE email=?`, email).
+		Scan(&u.ID, &u.OIDCSubject, &u.Email, &u.Name, &u.Language, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

@@ -65,50 +65,50 @@
 }
 </style>
 
-<nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · Eingetragen</nav>
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · {{.T "nav.recorded"}}</nav>
 
 <div class="done-shell">
-  <h1>✅ Spiel eingetragen!</h1>
+  <h1>{{.T "done.title"}}</h1>
   <p class="sub">{{.Result.BlackName}} vs. {{.Result.WhiteName}}</p>
 
   {{if eq .Result.Winner "black"}}
-  <div class="done-winner black"><span class="stone"></span> {{.Result.BlackName}} hat gewonnen</div>
+  <div class="done-winner black"><span class="stone"></span> {{.T "done.x_won" .Result.BlackName}}</div>
   {{else}}
-  <div class="done-winner white"><span class="stone"></span> {{.Result.WhiteName}} hat gewonnen</div>
+  <div class="done-winner white"><span class="stone"></span> {{.T "done.x_won" .Result.WhiteName}}</div>
   {{end}}
 
   <div class="done-players">
     {{/* --- Black --- */}}
     <div class="player-result">
       <div class="pname">⚫ {{.Result.BlackName}}</div>
-      <div class="delta-label">Punkte</div>
+      <div class="delta-label">{{.T "done.points"}}</div>
       <div class="delta {{if gt .Result.BlackDelta 0.0}}up{{else}}down{{end}}">{{printf "%+.0f" .Result.BlackDelta}}</div>
       {{if eq .Result.BlackRankChange 1}}
-      <div class="rankline up">🏅 Aufgestiegen auf <span class="rankgrade">{{.Result.BlackRankAfter}}</span></div>
+      <div class="rankline up">{{.T "done.promoted"}} <span class="rankgrade">{{.Result.BlackRankAfter}}</span></div>
       {{else if eq .Result.BlackRankChange -1}}
-      <div class="rankline down">Abgestiegen auf <span class="rankgrade">{{.Result.BlackRankAfter}}</span></div>
+      <div class="rankline down">{{.T "done.demoted"}} <span class="rankgrade">{{.Result.BlackRankAfter}}</span></div>
       {{else}}
-      <div class="rankline">Rang: <span class="rankgrade">{{.Result.BlackRankAfter}}</span> (gleich)</div>
+      <div class="rankline">{{.T "done.rank"}} <span class="rankgrade">{{.Result.BlackRankAfter}}</span> {{.T "done.same"}}</div>
       {{end}}
     </div>
     {{/* --- White --- */}}
     <div class="player-result">
       <div class="pname">⚪ {{.Result.WhiteName}}</div>
-      <div class="delta-label">Punkte</div>
+      <div class="delta-label">{{.T "done.points"}}</div>
       <div class="delta {{if gt .Result.WhiteDelta 0.0}}up{{else}}down{{end}}">{{printf "%+.0f" .Result.WhiteDelta}}</div>
       {{if eq .Result.WhiteRankChange 1}}
-      <div class="rankline up">🏅 Aufgestiegen auf <span class="rankgrade">{{.Result.WhiteRankAfter}}</span></div>
+      <div class="rankline up">{{.T "done.promoted"}} <span class="rankgrade">{{.Result.WhiteRankAfter}}</span></div>
       {{else if eq .Result.WhiteRankChange -1}}
-      <div class="rankline down">Abgestiegen auf <span class="rankgrade">{{.Result.WhiteRankAfter}}</span></div>
+      <div class="rankline down">{{.T "done.demoted"}} <span class="rankgrade">{{.Result.WhiteRankAfter}}</span></div>
       {{else}}
-      <div class="rankline">Rang: <span class="rankgrade">{{.Result.WhiteRankAfter}}</span> (gleich)</div>
+      <div class="rankline">{{.T "done.rank"}} <span class="rankgrade">{{.Result.WhiteRankAfter}}</span> {{.T "done.same"}}</div>
       {{end}}
     </div>
   </div>
 
   <div class="done-cta">
-    <a class="btn huge success" href="/g/{{.Group.Slug}}">🏆 Zur Rangliste</a>
-    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play/g/p1">Noch ein Spiel eintragen</a>
+    <a class="btn huge success" href="/g/{{.Group.Slug}}">{{.T "done.to_ranking"}}</a>
+    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play/g/p1">{{.T "done.another"}}</a>
   </div>
 </div>
 {{end}}

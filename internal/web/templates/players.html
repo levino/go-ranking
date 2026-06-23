@@ -1,22 +1,22 @@
 {{define "content"}}
-<nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · Spieler</nav>
-<h1>Spieler</h1>
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · {{.T "nav.players"}}</nav>
+<h1>{{.T "players.heading"}}</h1>
 
 {{if .Players}}
 <div class="table-scroll">
 <table>
-<tr><th>Name</th><th>Spielstärke</th><th>Status</th></tr>
+<tr><th>{{.T "th.name"}}</th><th>{{.T "th.strength"}}</th><th>{{.T "th.status"}}</th></tr>
 {{range .Players}}
 <tr>
   <td><a href="/g/{{$.Group.Slug}}/p/{{.ID}}">{{.Name}}</a></td>
   <td>{{rankFull .GoR .Deviation}}</td>
-  <td>{{if .Active}}aktiv{{else}}inaktiv{{end}}</td>
+  <td>{{if .Active}}{{$.T "status.active"}}{{else}}{{$.T "status.inactive"}}{{end}}</td>
 </tr>
 {{end}}
 </table>
 </div>
 {{else}}
-<p class="muted">Noch keine Spieler. Über die <a href="/g/{{.Group.Slug}}/play">Spielen-Seite</a> oder via MCP anlegen.</p>
+<p class="muted">{{.TH "players.empty_html" (printf "/g/%s/play" .Group.Slug)}}</p>
 {{end}}
 {{end}}
 {{template "layout" .}}

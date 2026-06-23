@@ -144,19 +144,19 @@
     <span class="on"></span><span class="on"></span><span class="on"></span>
   </div>
   <div class="result-hero">
-    <h1 style="margin-bottom:.3rem">Hier ist die Vorgabe</h1>
-    <p class="muted">Auf {{.Recommendation.Board}}-Brett</p>
+    <h1 style="margin-bottom:.3rem">{{.T "result.here_is"}}</h1>
+    <p class="muted">{{.T "result.on_board" .Recommendation.Board}}</p>
   </div>
 
   <div class="result-vs">
     <div class="result-side black">
-      <div class="role">Schwarz spielt</div>
+      <div class="role">{{.T "result.black_plays"}}</div>
       <div class="stone">⬤</div>
       <div class="name">{{.Recommendation.BlackPlayer.Name}}</div>
       <div class="rank">{{rank .Recommendation.BlackPlayer.GoR}}</div>
     </div>
     <div class="result-side white">
-      <div class="role">Weiß spielt</div>
+      <div class="role">{{.T "result.white_plays"}}</div>
       <div class="stone">○</div>
       <div class="name">{{.Recommendation.WhitePlayer.Name}}</div>
       <div class="rank">{{rank .Recommendation.WhitePlayer.GoR}}</div>
@@ -165,19 +165,19 @@
 
   <div class="handicap-card">
     {{if eq .Recommendation.Stones 0}}
-      <div class="label">Ebenes Spiel</div>
-      <div class="even-pill">Keine Vorgabe</div>
-      <div class="komi">{{komiText .Recommendation.Komi}}{{if lt .Recommendation.Komi 0.0}} — Schwarz bekommt am Ende Punkte abgezogen{{end}}</div>
+      <div class="label">{{.T "result.even_label"}}</div>
+      <div class="even-pill">{{.T "result.no_handicap"}}</div>
+      <div class="komi">{{.KomiText .Recommendation.Komi}}{{if lt .Recommendation.Komi 0.0}}{{.T "result.minus_points"}}{{end}}</div>
     {{else}}
-      <div class="label">Vorgabe für Schwarz</div>
-      <div class="num">{{.Recommendation.Stones}}<small>Steine</small></div>
-      <div class="komi">{{komiText .Recommendation.Komi}}</div>
+      <div class="label">{{.T "result.handicap_for_black"}}</div>
+      <div class="num">{{.Recommendation.Stones}}<small>{{.T "result.stones"}}</small></div>
+      <div class="komi">{{.KomiText .Recommendation.Komi}}</div>
     {{end}}
   </div>
 
   <div class="cta-row">
-    <a class="btn huge success" href="/g/{{.Group.Slug}}/play/g/finish?p1={{.Recommendation.BlackPlayer.ID}}&p2={{.Recommendation.WhitePlayer.ID}}&board={{.Recommendation.Board}}">Ergebnis eintragen</a>
-    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play">Fertig</a>
+    <a class="btn huge success" href="/g/{{.Group.Slug}}/play/g/finish?p1={{.Recommendation.BlackPlayer.ID}}&p2={{.Recommendation.WhitePlayer.ID}}&board={{.Recommendation.Board}}">{{.T "result.record_result"}}</a>
+    <a class="btn huge ghost" href="/g/{{.Group.Slug}}/play">{{.T "action.done"}}</a>
   </div>
 </div>
 {{end}}
