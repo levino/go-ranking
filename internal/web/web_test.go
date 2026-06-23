@@ -314,3 +314,73 @@ func TestGameFinishPageHasColorSwap(t *testing.T) {
 		}
 	}
 }
+
+// TestLanguageAcceptHeader: for an anonymous visitor the Accept-Language
+// header selects the UI language (the docs page is reachable without
+// login), while the default (no header) stays German.
+func TestLanguageAcceptHeader(t *testing.T) {
+	ts, _, _ := newTestWebServer(t)
+	c := &http.Client{}
+
+	// Default — German chrome.
+	req, _ := http.NewRequest("GET", ts.URL+"/docs", nil)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "Handbuch") {
+		t.Errorf("expected German 'Handbuch', got: %s", body)
+	}
+
+	// Accept-Language: en — English chrome.
+	req, _ = http.NewRequest("GET", ts.URL+"/docs", nil)
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	resp, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "Manual") {
+		t.Errorf("expected English 'Manual', got: %s", body)
+	}
+}
+
+// TestLanguagePreferencePersists: POSTing the language switch saves it to
+// the account and is reflected on later requests without any header.
+func TestLanguagePreferencePersists(t *testing.T) {
+	ts, svc, signer := newTestWebServer(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroupWithSlug(ctx, "g", "G")
+	u, _ := svc.Store.UpsertUserByOIDC(ctx, "u-sub", "u@example.com", "U")
+	_ = svc.Store.AddGroupAdmin(ctx, u.ID, g.ID)
+	c := loggedInClient(t, ts, signer, u.ID)
+
+	resp, err := c.PostForm(ts.URL+"/settings/language", url.Values{"lang": {"en"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// Stored on the account.
+	got, err := svc.Store.UserByID(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Language != "en" {
+		t.Fatalf("expected stored language 'en', got %q", got.Language)
+	}
+
+	// Reflected on a plain request (no Accept-Language header).
+	resp, err = c.Get(ts.URL + "/g/g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "Ranking") || strings.Contains(string(body), "Rangliste") {
+		t.Errorf("expected English UI after preference saved, got: %s", body)
+	}
+}

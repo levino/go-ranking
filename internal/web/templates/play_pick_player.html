@@ -98,14 +98,13 @@
   </div>
   {{else}}
   <div class="no-players">
-    Keine Spieler in der Gruppe.<br>
-    <strong>Sag deinem Trainer Bescheid</strong> — neue Spieler werden über den MCP-Server angelegt.
+    {{.TH "pick.no_players_html"}}
   </div>
   {{end}}
 
   <div class="wizard-actions">
-    <a class="btn ghost" href="{{.Wizard.BackPath}}">← Zurück</a>
-    <span class="muted" style="font-size:.9rem">Tippe auf einen Namen</span>
+    <a class="btn ghost" href="{{.Wizard.BackPath}}">{{.T "action.back"}}</a>
+    <span class="muted" style="font-size:.9rem">{{.T "pick.tap_name"}}</span>
   </div>
 </div>
 {{end}}

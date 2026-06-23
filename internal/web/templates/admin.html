@@ -1,10 +1,10 @@
 {{define "content"}}
-<nav class="breadcrumb"><a href="/">Start</a> / <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> / Admins</nav>
-<h1>{{.Group.Name}} — Admins</h1>
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> / <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> / {{.T "nav.admins"}}</nav>
+<h1>{{.Group.Name}} — {{.T "nav.admins"}}</h1>
 
 {{if .Admins}}
 <table>
-  <thead><tr><th>Name</th><th>E-Mail</th></tr></thead>
+  <thead><tr><th>{{.T "th.name"}}</th><th>{{.T "th.email"}}</th></tr></thead>
   <tbody>
   {{range .Admins}}
     <tr>
@@ -16,6 +16,6 @@
 </table>
 {{end}}
 
-<p class="muted">Admin-Verwaltung läuft über den MCP-Server: <code>add_admin</code> bzw. <code>remove_admin</code> mit <code>group: "{{.Group.Slug}}"</code> und der E-Mail des Users.</p>
+<p class="muted">{{.TH "admin.mcp_note_html" .Group.Slug}}</p>
 {{end}}
 {{template "layout" .}}

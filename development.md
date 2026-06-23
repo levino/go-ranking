@@ -43,10 +43,26 @@ a temporary SQLite database and exercise both the web UI and the MCP API.
 - `internal/passphrase` — adjective-noun session passphrase generator.
 - `internal/pdfgen` — handicap matrix and score-card PDFs.
 - `internal/web` — HTML UI (`html/template`), embedded templates.
+- `internal/i18n` — UI translation catalog and localizer (German/English).
 - `internal/mcp` — MCP HTTP/SSE server (Claude.ai-compatible).
 - `internal/e2e` — full-stack tests.
 - `deploy/` — Kubernetes manifests for K3s.
 - `.github/workflows/` — CI and CD pipelines.
+
+## Internationalisation
+
+The UI ships in German (default) and English. Strings live in
+`internal/i18n` as a flat `id → {de, en}` catalog; templates call
+`{{.T "key"}}` (or `{{.TH ...}}` for messages with markup) on the page
+context. The active language is resolved per request: a signed-in user's
+saved preference wins, then a `go_liga_lang` cookie, then the browser's
+`Accept-Language`, then German. Users change it on `/settings` or via the
+header switcher (`POST /settings/language`), which persists to the
+`users.language` column.
+
+The handbook is bilingual too: German pages live in
+`internal/docs/pages/`, English in `internal/docs/pages/en/`. A missing
+translation falls back to the German file, so navigation stays complete.
 
 ## Deployment
 

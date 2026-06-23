@@ -39,6 +39,10 @@ language, no forms required.
 classes, clubs, or age groups side by side, each with its own players and
 its own ranking.
 
+🌍 **English & German.** The whole interface — and the handbook — speaks
+both languages. Each account picks its own; switch any time from a tap in
+the header or the settings page.
+
 ## How it works
 
 1. Kids play Go at school with real boards and stones.

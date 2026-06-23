@@ -17,39 +17,39 @@
   .kpi .v { font-size: 1.6rem; }
 }
 </style>
-<nav class="breadcrumb"><a href="/">Start</a> · {{.Group.Name}}</nav>
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · {{.Group.Name}}</nav>
 <div class="dash-title">
   <h1>{{.Group.Name}}</h1>
-  <a class="btn" href="/g/{{.Group.Slug}}/play">Spielen</a>
+  <a class="btn" href="/g/{{.Group.Slug}}/play">{{.T "action.play"}}</a>
 </div>
 
 <div class="row">
-  <div class="kpi"><div class="muted">Spieler</div><div class="v">{{len .Players}}</div></div>
-  <div class="kpi"><div class="muted">Partien gesamt</div><div class="v">{{.GameCount}}</div></div>
+  <div class="kpi"><div class="muted">{{.T "nav.players"}}</div><div class="v">{{len .Players}}</div></div>
+  <div class="kpi"><div class="muted">{{.T "dashboard.total_games"}}</div><div class="v">{{.GameCount}}</div></div>
 </div>
 
-<h2>Rangliste</h2>
+<h2>{{.T "dashboard.ranking"}}</h2>
 {{if .Players}}
 <div class="table-scroll">
 <table>
-<tr><th>#</th><th>Name</th><th>Spielstärke</th><th>Status</th></tr>
+<tr><th>#</th><th>{{.T "th.name"}}</th><th>{{.T "th.strength"}}</th><th>{{.T "th.status"}}</th></tr>
 {{range $i, $p := .Players}}
 <tr>
   <td>{{add $i 1}}</td>
   <td><a href="/g/{{$.Group.Slug}}/p/{{$p.ID}}">{{$p.Name}}</a></td>
   <td>{{rankFull $p.GoR $p.Deviation}}</td>
-  <td>{{if $p.Active}}aktiv{{else}}inaktiv{{end}}</td>
+  <td>{{if $p.Active}}{{$.T "status.active"}}{{else}}{{$.T "status.inactive"}}{{end}}</td>
 </tr>
 {{end}}
 </table>
 </div>
-{{else}}<p class="muted">Noch keine Spieler.</p>{{end}}
+{{else}}<p class="muted">{{.T "common.no_players"}}</p>{{end}}
 
-<h2>Letzte Partien</h2>
+<h2>{{.T "dashboard.recent"}}</h2>
 {{if .RecentGames}}
 <div class="table-scroll">
 <table>
-<tr><th>Datum</th><th>Schwarz</th><th>Weiß</th><th>Brett</th><th>Vorgabe</th><th>Komi</th><th>Sieger</th><th>Δ Schwarz</th><th>Δ Weiß</th></tr>
+<tr><th>{{.T "th.date"}}</th><th>{{.T "color.black"}}</th><th>{{.T "color.white"}}</th><th>{{.T "th.board"}}</th><th>{{.T "th.handicap"}}</th><th>{{.T "th.komi"}}</th><th>{{.T "th.winner"}}</th><th>{{.T "th.delta_black"}}</th><th>{{.T "th.delta_white"}}</th></tr>
 {{range .RecentGames}}
 <tr>
   <td>{{.PlayedAt.Format "02.01. 15:04"}}</td>
@@ -58,13 +58,13 @@
   <td>{{.BoardSize}}</td>
   <td>{{.Handicap}}</td>
   <td>{{printf "%.1f" .Komi}}</td>
-  <td>{{.Winner}}</td>
+  <td>{{if eq .Winner "black"}}{{$.T "color.black"}}{{else}}{{$.T "color.white"}}{{end}}</td>
   <td>{{printf "%+.0f" (sub .BlackGoRAfter .BlackGoRBefore)}}</td>
   <td>{{printf "%+.0f" (sub .WhiteGoRAfter .WhiteGoRBefore)}}</td>
 </tr>
 {{end}}
 </table>
 </div>
-{{else}}<p class="muted">Noch keine Partien.</p>{{end}}
+{{else}}<p class="muted">{{.T "common.no_games"}}</p>{{end}}
 {{end}}
 {{template "layout" .}}

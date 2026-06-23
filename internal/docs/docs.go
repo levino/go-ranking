@@ -17,8 +17,13 @@ import (
 	"strings"
 )
 
-//go:embed pages/*.md
+//go:embed pages/*.md pages/en/*.md
 var pagesFS embed.FS
+
+// defaultLang is the language whose pages live directly under pages/.
+// Other languages live in pages/<lang>/ and fall back to the default
+// file when a translation is missing.
+const defaultLang = "de"
 
 // Page is a single chapter of the manual.
 type Page struct {
@@ -27,15 +32,32 @@ type Page struct {
 	Order int
 }
 
-// List returns the available pages, sorted by their numeric prefix.
-// Files are named `NN-slug.md`; the numeric prefix controls navigation
-// order, the slug becomes the URL, and the first level-1 heading
-// becomes the displayed title.
-func List() []Page {
+// dirFor returns the embedded directory holding a language's pages.
+func dirFor(lang string) string {
+	if lang == "" || lang == defaultLang {
+		return "pages"
+	}
+	return "pages/" + lang
+}
+
+// List returns the available pages in the default language. See
+// ListLang for language-aware listing.
+func List() []Page { return ListLang(defaultLang) }
+
+// ListLang returns the available pages for a language, sorted by their
+// numeric prefix. Files are named `NN-slug.md`; the numeric prefix
+// controls navigation order, the slug becomes the URL, and the first
+// level-1 heading becomes the displayed title. Pages missing in a
+// translation fall back to the default-language file (so the navigation
+// is always complete and slugs line up across languages).
+func ListLang(lang string) []Page {
+	// Drive ordering and slugs off the default set so every language
+	// exposes the same chapters in the same order.
 	entries, err := fs.ReadDir(pagesFS, "pages")
 	if err != nil {
 		return nil
 	}
+	dir := dirFor(lang)
 	var out []Page
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
@@ -49,9 +71,12 @@ func List() []Page {
 			fmt.Sscanf(stem[:i], "%d", &order)
 			slug = stem[i+1:]
 		}
-		content, err := fs.ReadFile(pagesFS, "pages/"+e.Name())
+		content, err := fs.ReadFile(pagesFS, dir+"/"+e.Name())
 		if err != nil {
-			continue
+			content, err = fs.ReadFile(pagesFS, "pages/"+e.Name())
+			if err != nil {
+				continue
+			}
 		}
 		out = append(out, Page{Slug: slug, Title: firstHeading(string(content)), Order: order})
 	}
@@ -59,10 +84,16 @@ func List() []Page {
 	return out
 }
 
-// Render returns the HTML body for the given slug, or empty string if
-// no such page exists.
-func Render(slug string) string {
+// Render returns the HTML body for the given slug in the default
+// language, or empty string if no such page exists.
+func Render(slug string) string { return RenderLang(defaultLang, slug) }
+
+// RenderLang returns the HTML body for a slug in the given language,
+// falling back to the default-language file when the translation is
+// absent. Empty string if no such page exists in any language.
+func RenderLang(lang, slug string) string {
 	entries, _ := fs.ReadDir(pagesFS, "pages")
+	dir := dirFor(lang)
 	for _, e := range entries {
 		stem := strings.TrimSuffix(e.Name(), ".md")
 		s := stem
@@ -70,7 +101,10 @@ func Render(slug string) string {
 			s = stem[i+1:]
 		}
 		if s == slug {
-			content, _ := fs.ReadFile(pagesFS, "pages/"+e.Name())
+			content, err := fs.ReadFile(pagesFS, dir+"/"+e.Name())
+			if err != nil {
+				content, _ = fs.ReadFile(pagesFS, "pages/"+e.Name())
+			}
 			return toHTML(string(content))
 		}
 	}

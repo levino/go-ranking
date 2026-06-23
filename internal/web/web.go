@@ -17,6 +17,7 @@ import (
 
 	"github.com/levino/go-ranking/internal/auth"
 	"github.com/levino/go-ranking/internal/docs"
+	"github.com/levino/go-ranking/internal/i18n"
 	"github.com/levino/go-ranking/internal/rating"
 	"github.com/levino/go-ranking/internal/service"
 	"github.com/levino/go-ranking/internal/store"
@@ -43,6 +44,7 @@ const (
 	userKey         ctxKey = "user"
 	oidcStateCookie        = "go_liga_oidc_state"
 	returnToCookie         = "go_liga_return_to"
+	langCookie             = "go_liga_lang"
 )
 
 func New(s *service.Service, signer *auth.Signer, oidc *auth.OIDC) (*Server, error) {
@@ -66,9 +68,10 @@ func deriveMCPURL(redirectURL string) string {
 
 func (s *Server) loadTemplates() error {
 	funcs := template.FuncMap{
-		"add":  func(a, b int) int { return a + b },
-		"sub":  func(a, b float64) float64 { return a - b },
-		"rank": rating.FormatRank,
+		"add":   func(a, b int) int { return a + b },
+		"sub":   func(a, b float64) float64 { return a - b },
+		"upper": strings.ToUpper,
+		"rank":  rating.FormatRank,
 		// rankFull renders a rating as the OGS profile does it, e.g.
 		// "11.0k ± 1.5" — a fractional grade plus a rank-space ±.
 		"rankFull": func(r, d float64) string {
@@ -103,15 +106,9 @@ func (s *Server) loadTemplates() error {
 			}
 			return template.CSS(palette[int(h%uint32(len(palette)))])
 		},
-		// Komi rendered with a non-confusing sign: positive shown as-is,
-		// negative shown as e.g. "Rückkomi 7,5" so the kids see what
-		// "negative" actually means in Go.
-		"komiText": func(v float64) string {
-			if v < 0 {
-				return fmt.Sprintf("Rückkomi %.1f", -v)
-			}
-			return fmt.Sprintf("Komi %.1f", v)
-		},
+		// Komi is rendered with a localized, non-confusing label via the
+		// pageContext.KomiText method (positive shown as-is, negative shown
+		// as "reverse komi"), so no template func is needed for it.
 		"contains": func(list []store.Player, id int64) bool {
 			for _, p := range list {
 				if p.ID == id {
@@ -122,7 +119,7 @@ func (s *Server) loadTemplates() error {
 		},
 	}
 	pages := []string{
-		"index", "dashboard", "players", "player", "admin", "docs",
+		"index", "dashboard", "players", "player", "admin", "docs", "settings",
 		"play_start", "play_pick_player", "play_pick_board",
 		"play_result", "play_record_finish", "play_confirm", "play_done",
 	}
@@ -149,6 +146,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/start", s.handleAuthStart)
 	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	mux.HandleFunc("POST /logout", s.handleLogout)
+
+	// Account settings (currently just the UI language).
+	mux.HandleFunc("GET /settings", s.handleSettings)
+	mux.HandleFunc("POST /settings/language", s.handleSetLanguage)
 
 	mux.HandleFunc("GET /g/{slug}", s.requireGroupAdmin(s.handleDashboard))
 	mux.HandleFunc("GET /g/{slug}/admins", s.requireGroupAdmin(s.handleAdminsGET))
@@ -199,6 +200,12 @@ type pageContext struct {
 	Groups []store.Group
 	Admins []store.User
 	MCPURL string
+
+	// Loc localizes UI strings; Path is the current request path, used by
+	// the header language switcher to return to the same page. Both are
+	// filled in by render() so individual handlers needn't set them.
+	Loc  *i18n.Localizer
+	Path string
 	// per-page extras
 	Players     []store.Player
 	RecentGames []store.Game
@@ -228,6 +235,55 @@ type pageContext struct {
 
 	// Result is the post-commit summary shown on the play-done page.
 	Result *GameResult
+}
+
+// loc returns the page's localizer, defaulting to German if unset so a
+// template can never panic on a nil receiver.
+func (c pageContext) loc() *i18n.Localizer {
+	if c.Loc == nil {
+		return i18n.New(i18n.Default)
+	}
+	return c.Loc
+}
+
+// Lang is the active language code, used for the <html lang> attribute
+// and to highlight the active entry in the language switcher.
+func (c pageContext) Lang() string { return string(c.loc().Lang()) }
+
+// T translates a message id (templates: {{.T "key"}} or {{$.T "key"}}).
+func (c pageContext) T(id string, args ...any) string { return c.loc().T(id, args...) }
+
+// TH translates a message id whose value contains trusted HTML markup
+// (e.g. an embedded <code> or <a>), returning it unescaped.
+func (c pageContext) TH(id string, args ...any) template.HTML {
+	return template.HTML(c.loc().T(id, args...))
+}
+
+// KomiText renders a komi with a localized label, mirroring how Go
+// names negative komi ("reverse komi").
+func (c pageContext) KomiText(v float64) string {
+	if v < 0 {
+		return c.loc().T("komi.reverse", -v)
+	}
+	return c.loc().T("komi.normal", v)
+}
+
+// Languages lists the selectable languages for the settings page and
+// switcher, marking the active one.
+func (c pageContext) Languages() []LanguageOption {
+	active := c.loc().Lang()
+	out := make([]LanguageOption, 0, len(i18n.Supported))
+	for _, l := range i18n.Supported {
+		out = append(out, LanguageOption{Code: string(l.Lang), Name: l.Name, Active: l.Lang == active})
+	}
+	return out
+}
+
+// LanguageOption is one row in the language picker.
+type LanguageOption struct {
+	Code   string
+	Name   string
+	Active bool
 }
 
 // WizardState carries the per-step navigation context for the play
@@ -307,16 +363,37 @@ func (s *Server) requireGroupAdmin(h func(w http.ResponseWriter, r *http.Request
 
 // ---- Handlers ------------------------------------------------------------
 
-func (s *Server) render(w http.ResponseWriter, name string, data pageContext) {
+func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, data pageContext) {
 	t, ok := s.tmpls[name]
 	if !ok {
 		http.Error(w, "template missing: "+name, 500)
 		return
 	}
+	if data.Loc == nil {
+		data.Loc = s.loc(r)
+	}
+	if data.Path == "" {
+		// RequestURI keeps the query string so switching language mid-wizard
+		// returns to the exact same step.
+		data.Path = r.URL.RequestURI()
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render %s: %v", name, err)
 	}
+}
+
+// loc resolves the UI language for a request: an authenticated user's
+// saved preference wins; otherwise a previously chosen cookie; otherwise
+// the browser's Accept-Language; finally the default (German).
+func (s *Server) loc(r *http.Request) *i18n.Localizer {
+	if u := userOf(r); u != nil && u.Language != "" {
+		return i18n.New(i18n.Parse(u.Language))
+	}
+	if c, err := r.Cookie(langCookie); err == nil && c.Value != "" {
+		return i18n.New(i18n.Parse(c.Value))
+	}
+	return i18n.New(i18n.FromAcceptLanguage(r.Header.Get("Accept-Language")))
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -336,7 +413,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/g/"+groups[0].Slug, http.StatusFound)
 		return
 	}
-	s.render(w, "index", pageContext{Title: "Start", User: u, Groups: groups, MCPURL: s.mcpURL})
+	loc := s.loc(r)
+	s.render(w, r, "index", pageContext{Title: loc.T("title.start"), User: u, Groups: groups, MCPURL: s.mcpURL, Loc: loc})
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
@@ -445,13 +523,62 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
+// handleSettings shows the per-account settings page (login required).
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	u := userOf(r)
+	if u == nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	loc := s.loc(r)
+	ctx := pageContext{Title: loc.T("settings.title"), User: u, Loc: loc}
+	if r.URL.Query().Get("saved") != "" {
+		ctx.Flash = loc.T("settings.saved")
+	}
+	s.render(w, r, "settings", ctx)
+}
+
+// handleSetLanguage persists the chosen UI language. It always sets a
+// cookie (so the choice survives for anonymous pages such as login) and,
+// for a signed-in user, also saves it to their account. Redirects back
+// to the page the switch was triggered from.
+func (s *Server) handleSetLanguage(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	lang := string(i18n.Parse(r.FormValue("lang")))
+	http.SetCookie(w, &http.Cookie{
+		Name:     langCookie,
+		Value:    lang,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   365 * 24 * 3600,
+	})
+	if u := userOf(r); u != nil {
+		if err := s.Service.Store.UpdateUserLanguage(r.Context(), u.ID, lang); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+	}
+	// Return to where the user was; path-only to avoid open redirects.
+	dest := "/settings?saved=1"
+	if rt := r.FormValue("return_to"); strings.HasPrefix(rt, "/") {
+		dest = rt
+	}
+	http.Redirect(w, r, dest, http.StatusFound)
+}
+
 func (s *Server) handleAdminsGET(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	admins, err := s.Service.Store.ListGroupAdmins(r.Context(), g.ID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	s.render(w, "admin", pageContext{Title: g.Name + " — Admins", User: userOf(r), Group: g, Admins: admins, MCPURL: s.mcpURL})
+	loc := s.loc(r)
+	s.render(w, r, "admin", pageContext{Title: loc.T("title.admins", g.Name), User: userOf(r), Group: g, Admins: admins, MCPURL: s.mcpURL, Loc: loc})
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -461,7 +588,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *stor
 	for _, p := range players {
 		pn[p.ID] = p.Name
 	}
-	s.render(w, "dashboard", pageContext{
+	s.render(w, r, "dashboard", pageContext{
 		Title:       g.Name,
 		User:        userOf(r),
 		Group:       g,
@@ -474,7 +601,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *stor
 
 func (s *Server) handlePlayersGET(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	players, _ := s.Service.Store.ListPlayers(r.Context(), g.ID, true)
-	s.render(w, "players", pageContext{Title: "Spieler", User: userOf(r), Group: g, Players: players})
+	loc := s.loc(r)
+	s.render(w, r, "players", pageContext{Title: loc.T("title.players"), User: userOf(r), Group: g, Players: players, Loc: loc})
 }
 
 // RatingRow is one line of the player profile's ratings grid.
@@ -526,7 +654,7 @@ func (s *Server) handlePlayerProfile(w http.ResponseWriter, r *http.Request, g *
 		rev[len(games)-1-i] = gm
 	}
 
-	s.render(w, "player", pageContext{
+	s.render(w, r, "player", pageContext{
 		Title: p.Name, User: userOf(r), Group: g,
 		Player: p, RatingRows: rows, ProfileGames: rev, PlayerNames: pn,
 	})
@@ -534,26 +662,27 @@ func (s *Server) handlePlayerProfile(w http.ResponseWriter, r *http.Request, g *
 
 // handlePlayStart is the landing page: two big entry buttons.
 func (s *Server) handlePlayStart(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	ctx := s.basePlayContext(r, g, "Spielen — "+g.Name)
+	ctx := s.basePlayContext(r, g, s.loc(r).T("title.play", g.Name))
 	if f := r.URL.Query().Get("flash"); f != "" {
 		ctx.Flash = f
 	}
-	s.render(w, "play_start", ctx)
+	s.render(w, r, "play_start", ctx)
 }
 
 // ---- Recommend wizard ----------------------------------------------------
 
 func (s *Server) handleRecP1(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	ctx := s.basePlayContext(r, g, "Wer spielt?")
+	loc := s.loc(r)
+	ctx := s.basePlayContext(r, g, loc.T("title.who_plays"))
 	ctx.Wizard = WizardState{
 		Flow: "r", Step: 1,
-		Headline: "Wer ist der erste Spieler?",
+		Headline: loc.T("wiz.rec.p1"),
 		BackPath: "/g/" + g.Slug + "/play",
 		NextPathFor: func(id int64) string {
 			return fmt.Sprintf("/g/%s/play/r/p2?p1=%d", g.Slug, id)
 		},
 	}
-	s.render(w, "play_pick_player", ctx)
+	s.render(w, r, "play_pick_player", ctx)
 }
 
 func (s *Server) handleRecP2(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -562,17 +691,18 @@ func (s *Server) handleRecP2(w http.ResponseWriter, r *http.Request, g *store.Gr
 		http.Redirect(w, r, "/g/"+g.Slug+"/play/r/p1", http.StatusFound)
 		return
 	}
-	ctx := s.basePlayContext(r, g, "Und der zweite?")
+	loc := s.loc(r)
+	ctx := s.basePlayContext(r, g, loc.T("title.and_second"))
 	ctx.Players = filterPlayers(ctx.Players, p1)
 	ctx.Wizard = WizardState{
 		Flow: "r", Step: 2,
-		Headline: "Und wer ist Spieler 2?",
+		Headline: loc.T("wiz.rec.p2"),
 		BackPath: "/g/" + g.Slug + "/play/r/p1",
 		NextPathFor: func(id int64) string {
 			return fmt.Sprintf("/g/%s/play/r/board?p1=%d&p2=%d", g.Slug, p1, id)
 		},
 	}
-	s.render(w, "play_pick_player", ctx)
+	s.render(w, r, "play_pick_player", ctx)
 }
 
 func (s *Server) handleRecBoard(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -582,16 +712,17 @@ func (s *Server) handleRecBoard(w http.ResponseWriter, r *http.Request, g *store
 		http.Redirect(w, r, "/g/"+g.Slug+"/play/r/p1", http.StatusFound)
 		return
 	}
-	ctx := s.basePlayContext(r, g, "Wie groß ist das Brett?")
+	loc := s.loc(r)
+	ctx := s.basePlayContext(r, g, loc.T("title.board_size"))
 	ctx.Wizard = WizardState{
 		Flow: "r", Step: 3,
-		Headline: "Wie groß ist das Brett?",
+		Headline: loc.T("wiz.board"),
 		BackPath: fmt.Sprintf("/g/%s/play/r/p2?p1=%d", g.Slug, p1),
 	}
 	ctx.NextBoard = func(board int) string {
 		return fmt.Sprintf("/g/%s/play/r/result?p1=%d&p2=%d&board=%d", g.Slug, p1, p2, board)
 	}
-	s.render(w, "play_pick_board", ctx)
+	s.render(w, r, "play_pick_board", ctx)
 }
 
 func (s *Server) handleRecResult(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -607,24 +738,25 @@ func (s *Server) handleRecResult(w http.ResponseWriter, r *http.Request, g *stor
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	ctx := s.basePlayContext(r, g, "Vorgabe")
+	ctx := s.basePlayContext(r, g, s.loc(r).T("title.handicap"))
 	ctx.Recommendation = rec
-	s.render(w, "play_result", ctx)
+	s.render(w, r, "play_result", ctx)
 }
 
 // ---- Record wizard -------------------------------------------------------
 
 func (s *Server) handleGameP1(w http.ResponseWriter, r *http.Request, g *store.Group) {
-	ctx := s.basePlayContext(r, g, "Spiel eintragen")
+	loc := s.loc(r)
+	ctx := s.basePlayContext(r, g, loc.T("title.record"))
 	ctx.Wizard = WizardState{
 		Flow: "g", Step: 1,
-		Headline: "Wer hat gespielt? Spieler 1.",
+		Headline: loc.T("wiz.game.p1"),
 		BackPath: "/g/" + g.Slug + "/play",
 		NextPathFor: func(id int64) string {
 			return fmt.Sprintf("/g/%s/play/g/p2?p1=%d", g.Slug, id)
 		},
 	}
-	s.render(w, "play_pick_player", ctx)
+	s.render(w, r, "play_pick_player", ctx)
 }
 
 func (s *Server) handleGameP2(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -633,17 +765,18 @@ func (s *Server) handleGameP2(w http.ResponseWriter, r *http.Request, g *store.G
 		http.Redirect(w, r, "/g/"+g.Slug+"/play/g/p1", http.StatusFound)
 		return
 	}
-	ctx := s.basePlayContext(r, g, "Spieler 2?")
+	loc := s.loc(r)
+	ctx := s.basePlayContext(r, g, loc.T("title.player2"))
 	ctx.Players = filterPlayers(ctx.Players, p1)
 	ctx.Wizard = WizardState{
 		Flow: "g", Step: 2,
-		Headline: "Und wer noch?",
+		Headline: loc.T("wiz.game.p2"),
 		BackPath: "/g/" + g.Slug + "/play/g/p1",
 		NextPathFor: func(id int64) string {
 			return fmt.Sprintf("/g/%s/play/g/board?p1=%d&p2=%d", g.Slug, p1, id)
 		},
 	}
-	s.render(w, "play_pick_player", ctx)
+	s.render(w, r, "play_pick_player", ctx)
 }
 
 func (s *Server) handleGameBoard(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -653,16 +786,17 @@ func (s *Server) handleGameBoard(w http.ResponseWriter, r *http.Request, g *stor
 		http.Redirect(w, r, "/g/"+g.Slug+"/play/g/p1", http.StatusFound)
 		return
 	}
-	ctx := s.basePlayContext(r, g, "Brettgröße")
+	loc := s.loc(r)
+	ctx := s.basePlayContext(r, g, loc.T("title.board_size"))
 	ctx.Wizard = WizardState{
 		Flow: "g", Step: 3,
-		Headline: "Auf welchem Brett?",
+		Headline: loc.T("wiz.game.board"),
 		BackPath: fmt.Sprintf("/g/%s/play/g/p2?p1=%d", g.Slug, p1),
 	}
 	ctx.NextBoard = func(board int) string {
 		return fmt.Sprintf("/g/%s/play/g/finish?p1=%d&p2=%d&board=%d", g.Slug, p1, p2, board)
 	}
-	s.render(w, "play_pick_board", ctx)
+	s.render(w, r, "play_pick_board", ctx)
 }
 
 func (s *Server) handleGameFinish(w http.ResponseWriter, r *http.Request, g *store.Group) {
@@ -678,14 +812,15 @@ func (s *Server) handleGameFinish(w http.ResponseWriter, r *http.Request, g *sto
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	ctx := s.basePlayContext(r, g, "Ergebnis")
+	loc := s.loc(r)
+	ctx := s.basePlayContext(r, g, loc.T("title.result"))
 	ctx.Recommendation = rec
 	ctx.Wizard = WizardState{
 		Flow: "g", Step: 4,
 		BackPath: fmt.Sprintf("/g/%s/play/g/board?p1=%d&p2=%d", g.Slug, p1, p2),
-		Headline: "Wer hat gewonnen?",
+		Headline: loc.T("wiz.game.who_won"),
 	}
-	s.render(w, "play_record_finish", ctx)
+	s.render(w, r, "play_record_finish", ctx)
 }
 
 // handleGameConfirm shows the preview/confirmation page after the
@@ -719,7 +854,7 @@ func (s *Server) handleGameConfirm(w http.ResponseWriter, r *http.Request, g *st
 		return
 	}
 	pn := map[int64]string{bp.ID: bp.Name, wp.ID: wp.Name}
-	ctx := s.basePlayContext(r, g, "Bestätigen")
+	ctx := s.basePlayContext(r, g, s.loc(r).T("title.confirm"))
 	ctx.PlayerNames = pn
 	ctx.Recommendation = &service.Recommendation{
 		BlackPlayer: bp, WhitePlayer: wp, Board: board,
@@ -731,7 +866,7 @@ func (s *Server) handleGameConfirm(w http.ResponseWriter, r *http.Request, g *st
 	}
 	ctx.SelectedKomi = komi
 	ctx.Flash = winner
-	s.render(w, "play_confirm", ctx)
+	s.render(w, r, "play_confirm", ctx)
 }
 
 // handleGameCommit writes the game to the store, then redirects (POST →
@@ -805,7 +940,7 @@ func (s *Server) handleGameDone(w http.ResponseWriter, r *http.Request, g *store
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	ctx := s.basePlayContext(r, g, "Eingetragen!")
+	ctx := s.basePlayContext(r, g, s.loc(r).T("title.recorded"))
 	ctx.Result = &GameResult{
 		BlackName:       bp.Name,
 		WhiteName:       wp.Name,
@@ -817,14 +952,16 @@ func (s *Server) handleGameDone(w http.ResponseWriter, r *http.Request, g *store
 		BlackRankChange: rankChange(gm.BlackGoRBefore, gm.BlackGoRAfter),
 		WhiteRankChange: rankChange(gm.WhiteGoRBefore, gm.WhiteGoRAfter),
 	}
-	s.render(w, "play_done", ctx)
+	s.render(w, r, "play_done", ctx)
 }
 
 // handleDocs serves the embedded Markdown manual. The slug comes from
 // the path; if empty (i.e. just `/docs`), redirect to the first page.
 func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
+	loc := s.loc(r)
+	lang := string(loc.Lang())
 	slug := r.PathValue("slug")
-	pages := docs.List()
+	pages := docs.ListLang(lang)
 	if len(pages) == 0 {
 		http.NotFound(w, r)
 		return
@@ -833,7 +970,7 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/docs/"+pages[0].Slug, http.StatusFound)
 		return
 	}
-	body := docs.Render(slug)
+	body := docs.RenderLang(lang, slug)
 	if body == "" {
 		http.NotFound(w, r)
 		return
@@ -844,12 +981,13 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 			title = p.Title
 		}
 	}
-	s.render(w, "docs", pageContext{
-		Title:      title + " — Handbuch",
+	s.render(w, r, "docs", pageContext{
+		Title:      loc.T("title.docs", title),
 		User:       userOf(r),
 		DocsList:   pages,
 		DocCurrent: slug,
 		DocBody:    template.HTML(body),
+		Loc:        loc,
 	})
 }
 
@@ -869,6 +1007,7 @@ func (s *Server) basePlayContext(r *http.Request, g *store.Group, title string) 
 		Players:     players,
 		RecentGames: games,
 		PlayerNames: pn,
+		Loc:         s.loc(r),
 	}
 }
 

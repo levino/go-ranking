@@ -16,51 +16,50 @@
   color: #fff; font-weight: 700; font-size: 1.3rem;
 }
 </style>
-<nav class="breadcrumb"><a href="/">Start</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · {{.Player.Name}}</nav>
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · {{.Player.Name}}</nav>
 
 <div class="profile-head">
   <div class="profile-avatar" style="background: {{tileColor .Player.Name}}">{{slice .Player.Name 0 1}}</div>
   <div>
     <h1 style="margin:0">{{.Player.Name}}</h1>
-    <div class="muted">{{if .Player.Active}}aktiv{{else}}inaktiv{{end}}</div>
+    <div class="muted">{{if .Player.Active}}{{.T "status.active"}}{{else}}{{.T "status.inactive"}}{{end}}</div>
   </div>
 </div>
 
-<h2>Bewertungen</h2>
+<h2>{{.T "player.ratings"}}</h2>
 <table class="grid-table">
-  <thead><tr><th>Brett</th><th>Spielstärke</th><th>Partien</th></tr></thead>
+  <thead><tr><th>{{.T "th.board"}}</th><th>{{.T "th.strength"}}</th><th>{{.T "th.games"}}</th></tr></thead>
   <tbody>
   {{range .RatingRows}}
     <tr{{if eq .Label "Gesamt"}} class="grid-row-overall"{{end}}>
-      <td class="cat">{{.Label}}</td>
+      <td class="cat">{{if eq .Label "Gesamt"}}{{$.T "player.label_overall"}}{{else}}{{.Label}}{{end}}</td>
       <td class="strength">
-        {{if .Active}}{{rankFull .Rating .Deviation}}{{else}}<span class="empty">— noch keine Partie</span>{{end}}
+        {{if .Active}}{{rankFull .Rating .Deviation}}{{else}}<span class="empty">{{$.T "player.no_game"}}</span>{{end}}
       </td>
       <td>{{if .Active}}{{.Games}}{{else}}0{{end}}</td>
     </tr>
   {{end}}
   </tbody>
 </table>
-<p class="muted">„Gesamt" ist die OGS-Bewertung über alle Partien; darunter je eine eigene
-Glicko-2-Bewertung pro Brettgröße. Das ± ist die Unsicherheit in Rangstufen.</p>
+<p class="muted">{{.T "player.ratings_note"}}</p>
 
-<h2>Partien</h2>
+<h2>{{.T "player.games"}}</h2>
 {{if .ProfileGames}}
 <div class="table-scroll">
 <table>
-<tr><th>Datum</th><th>Farbe</th><th>Gegner</th><th>Brett</th><th>Vorgabe</th><th>Komi</th><th>Ergebnis</th><th>Δ</th></tr>
+<tr><th>{{.T "th.date"}}</th><th>{{.T "th.color"}}</th><th>{{.T "th.opponent"}}</th><th>{{.T "th.board"}}</th><th>{{.T "th.handicap"}}</th><th>{{.T "th.komi"}}</th><th>{{.T "th.result"}}</th><th>Δ</th></tr>
 {{range .ProfileGames}}
   {{$black := eq .BlackPlayerID $.Player.ID}}
   <tr>
     <td>{{.PlayedAt.Format "02.01. 15:04"}}</td>
-    <td>{{if $black}}Schwarz{{else}}Weiß{{end}}</td>
+    <td>{{if $black}}{{$.T "color.black"}}{{else}}{{$.T "color.white"}}{{end}}</td>
     <td>{{if $black}}{{playerName $.PlayerNames .WhitePlayerID}}{{else}}{{playerName $.PlayerNames .BlackPlayerID}}{{end}}</td>
     <td>{{.BoardSize}}</td>
     <td>{{.Handicap}}</td>
     <td>{{printf "%.1f" .Komi}}</td>
     <td>
-      {{if $black}}{{if eq .Winner "black"}}Sieg{{else}}Niederlage{{end}}
-      {{else}}{{if eq .Winner "white"}}Sieg{{else}}Niederlage{{end}}{{end}}
+      {{if $black}}{{if eq .Winner "black"}}{{$.T "result.win"}}{{else}}{{$.T "result.loss"}}{{end}}
+      {{else}}{{if eq .Winner "white"}}{{$.T "result.win"}}{{else}}{{$.T "result.loss"}}{{end}}{{end}}
     </td>
     <td>
       {{if $black}}{{printf "%+.0f" (sub .BlackGoRAfter .BlackGoRBefore)}}
@@ -70,6 +69,6 @@ Glicko-2-Bewertung pro Brettgröße. Das ± ist die Unsicherheit in Rangstufen.<
 {{end}}
 </table>
 </div>
-{{else}}<p class="muted">Noch keine Partien.</p>{{end}}
+{{else}}<p class="muted">{{.T "common.no_games"}}</p>{{end}}
 {{end}}
 {{template "layout" .}}

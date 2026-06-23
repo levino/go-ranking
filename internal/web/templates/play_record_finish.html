@@ -169,24 +169,24 @@
       <div class="finish-side black">
         <div class="stone">⬤</div>
         <div>
-          <div class="muted" style="font-size:.8rem;letter-spacing:.1em">SCHWARZ</div>
+          <div class="muted" style="font-size:.8rem;letter-spacing:.1em">{{.T "color.black_up"}}</div>
           <div class="name" id="name-black">{{.Recommendation.BlackPlayer.Name}}</div>
         </div>
       </div>
       <div class="finish-side white">
         <div class="stone">○</div>
         <div>
-          <div class="muted" style="font-size:.8rem;letter-spacing:.1em">WEISS</div>
+          <div class="muted" style="font-size:.8rem;letter-spacing:.1em">{{.T "color.white_up"}}</div>
           <div class="name" id="name-white">{{.Recommendation.WhitePlayer.Name}}</div>
         </div>
       </div>
     </div>
-    <button type="button" class="btn ghost swap-btn" onclick="swapColors()">⇄ Farben tauschen</button>
+    <button type="button" class="btn ghost swap-btn" onclick="swapColors()">{{.T "finish.swap"}}</button>
 
     <div class="handicap-tuner">
-      <h3>So gespielt</h3>
+      <h3>{{.T "finish.as_played"}}</h3>
       <div class="tune-row">
-        <div class="tune-label">Vorgabe</div>
+        <div class="tune-label">{{.T "th.handicap"}}</div>
         <div class="tune-controls">
           <button type="button" class="tune-btn" onclick="bump('handicap',-1,0,9)">−</button>
           <div class="tune-display"><input type="number" name="handicap" id="f-handicap" value="{{.Recommendation.Stones}}" min="0" max="9" step="1" inputmode="numeric"></div>
@@ -194,29 +194,29 @@
         </div>
       </div>
       <div class="tune-row">
-        <div class="tune-label">Komi</div>
+        <div class="tune-label">{{.T "th.komi"}}</div>
         <div class="tune-controls">
           <button type="button" class="tune-btn" onclick="bump('komi',-1,-29.5,29.5)">−</button>
           <div class="tune-display"><input type="number" name="komi" id="f-komi" value="{{printf "%.1f" .Recommendation.Komi}}" step="1" inputmode="decimal"></div>
           <button type="button" class="tune-btn" onclick="bump('komi',1,-29.5,29.5)">+</button>
         </div>
       </div>
-      <div class="komi-hint">Komi darf negativ sein (Rückkomi) — vor allem auf 9×9 sinnvoll. Es endet immer auf ,5, damit es kein Unentschieden geben kann.</div>
+      <div class="komi-hint">{{.T "finish.komi_hint"}}</div>
     </div>
 
     <div class="winner-row">
       <button class="winner-btn black" type="submit" name="winner" value="black">
         <span class="stone"></span>
-        Schwarz gewinnt
+        {{.T "finish.black_wins"}}
       </button>
       <button class="winner-btn white" type="submit" name="winner" value="white">
         <span class="stone"></span>
-        Weiß gewinnt
+        {{.T "finish.white_wins"}}
       </button>
     </div>
 
     <div class="wizard-actions">
-      <a class="btn ghost" href="{{.Wizard.BackPath}}">← Zurück</a>
+      <a class="btn ghost" href="{{.Wizard.BackPath}}">{{.T "action.back"}}</a>
     </div>
   </div>
 </form>
