@@ -122,6 +122,7 @@ func (s *Server) loadTemplates() error {
 		"index", "dashboard", "players", "player", "admin", "docs", "settings",
 		"play_start", "play_pick_player", "play_pick_board",
 		"play_result", "play_record_finish", "play_confirm", "play_done",
+		"tournaments", "tournament",
 	}
 	s.tmpls = map[string]*template.Template{}
 	for _, p := range pages {
@@ -155,6 +156,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /g/{slug}/admins", s.requireGroupAdmin(s.handleAdminsGET))
 	mux.HandleFunc("GET /g/{slug}/players", s.requireGroupAdmin(s.handlePlayersGET))
 	mux.HandleFunc("GET /g/{slug}/p/{id}", s.requireGroupAdmin(s.handlePlayerProfile))
+
+	// Tournaments — create, pick players, run rounds, standings.
+	mux.HandleFunc("GET /g/{slug}/tournaments", s.requireGroupAdmin(s.handleTournamentsList))
+	mux.HandleFunc("POST /g/{slug}/tournaments", s.requireGroupAdmin(s.handleTournamentCreate))
+	mux.HandleFunc("GET /g/{slug}/t/{id}", s.requireGroupAdmin(s.handleTournamentDetail))
+	mux.HandleFunc("POST /g/{slug}/t/{id}/start", s.requireGroupAdmin(s.handleTournamentStart))
+	mux.HandleFunc("POST /g/{slug}/t/{id}/result", s.requireGroupAdmin(s.handleTournamentResult))
+	mux.HandleFunc("POST /g/{slug}/t/{id}/next", s.requireGroupAdmin(s.handleTournamentNext))
 
 	// Tablet UI — a multi-step wizard the kids tap through.
 	// /play landing has two entry buttons: Vorgabe-Rechner & Spiel-Eintrag.
@@ -235,6 +244,13 @@ type pageContext struct {
 
 	// Result is the post-commit summary shown on the play-done page.
 	Result *GameResult
+
+	// Tournament page extras.
+	Tournaments []store.Tournament
+	Tournament  *store.Tournament
+	Rounds      []RoundView
+	Standings   []StandingView
+	CanAdvance  bool // current round complete and more rounds remain
 }
 
 // loc returns the page's localizer, defaulting to German if unset so a

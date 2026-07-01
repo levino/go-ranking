@@ -1,0 +1,166 @@
+{{define "content"}}
+<style>
+.t-head { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; margin-bottom: .3rem; }
+.t-head h1 { margin: 0; }
+.t-sub { color: var(--muted); margin: 0 0 1.4rem; }
+.winner-banner {
+  padding: 1rem 1.3rem; margin: 0 0 1.5rem; border-radius: 14px;
+  background: linear-gradient(135deg, #fff0c2 0%, #ffd97a 100%);
+  border: 1px solid #eabf5e; color: #6b4e00; font-weight: 600; font-size: 1.15rem;
+}
+/* Player picker (setup) */
+.pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .7rem; margin: 1rem 0 1.5rem; }
+@media (max-width: 640px) { .pick-grid { grid-template-columns: repeat(2, 1fr); } }
+.pick-tile {
+  position: relative; display: flex; flex-direction: column; justify-content: flex-end;
+  min-height: 90px; padding: .8rem; border-radius: 14px; cursor: pointer;
+  border: 2px solid var(--line); background: var(--paper-2);
+  font-family: 'Fraunces', serif; font-weight: 700; font-size: 1.1rem; line-height: 1.1;
+  transition: border-color .1s, box-shadow .1s;
+}
+.pick-tile .rank { font-family: 'Lexend Deca', sans-serif; font-weight: 500; font-size: .8rem; color: var(--muted); }
+.pick-tile input { position: absolute; opacity: 0; pointer-events: none; }
+.pick-tile:has(input:checked) { border-color: var(--ok); box-shadow: 0 0 0 3px rgba(15,157,88,.18); background: #eefaf1; }
+.pick-tile .tick { position: absolute; top: .5rem; right: .6rem; opacity: 0; color: var(--ok); font-weight: 800; }
+.pick-tile:has(input:checked) .tick { opacity: 1; }
+
+/* Rounds */
+.round { margin-bottom: 1.8rem; }
+.round h3 {
+  font-family: 'Fraunces', serif; font-size: 1.2rem; margin: 0 0 .6rem;
+  display: flex; align-items: center; gap: .6rem;
+}
+.round .tag { font-family: 'Lexend Deca', sans-serif; font-size: .72rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px; }
+.round .tag.done { background: #d8eedf; color: #144d2b; }
+.round .tag.open { background: #fff3cd; color: #7a5c00; }
+.board {
+  display: flex; align-items: center; gap: .8rem; flex-wrap: wrap;
+  padding: .7rem .9rem; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--paper-2); margin-bottom: .5rem;
+}
+.board .no { font-weight: 700; color: var(--muted); min-width: 1.5rem; }
+.board .players { flex: 1 1 auto; }
+.board .side { font-weight: 600; }
+.board .side.win { color: var(--ok); }
+.board .stone { font-size: .8rem; color: var(--muted); }
+.board .vs { color: var(--muted); margin: 0 .4rem; }
+.board .acts { display: flex; gap: .4rem; flex-wrap: wrap; }
+.board form { margin: 0; }
+.board .btn.mini { padding: .4rem .7rem; font-size: .85rem; min-height: 0; border-radius: 9px; }
+.board.bye { background: #f6f4ec; }
+</style>
+
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · <a href="/g/{{.Group.Slug}}/tournaments">{{.T "nav.tournaments"}}</a> · {{.Tournament.Name}}</nav>
+
+<div class="t-head">
+  <h1>{{.Tournament.Name}}</h1>
+  <span class="badge {{.Tournament.Status}}">
+    {{if eq .Tournament.Status "setup"}}{{.T "tourn.status.setup"}}{{else if eq .Tournament.Status "running"}}{{.T "tourn.status.running"}}{{else}}{{.T "tourn.status.finished"}}{{end}}
+  </span>
+</div>
+<p class="t-sub">
+  {{if eq .Tournament.Format "mcmahon"}}McMahon{{else}}{{.T "tourn.format.rr"}}{{end}}
+  · {{.Tournament.BoardSize}}
+  · {{if .Tournament.Handicap}}{{.T "tourn.handicap_on"}}{{else}}{{.T "tourn.handicap_off"}}{{end}}
+</p>
+
+{{if eq .Tournament.Status "setup"}}
+  {{/* ---- Setup: choose players and start ---- */}}
+  <h2>{{.T "tourn.pick_players"}}</h2>
+  <p class="muted">{{.T "tourn.pick_hint"}}</p>
+  <form action="/g/{{.Group.Slug}}/t/{{.Tournament.ID}}/start" method="post">
+    {{if .Players}}
+    <div class="pick-grid">
+      {{range .Players}}
+      <label class="pick-tile">
+        <input type="checkbox" name="player" value="{{.ID}}" checked>
+        <span class="tick">✓</span>
+        <span class="rank">{{rank .GoR}}</span>
+        {{.Name}}
+      </label>
+      {{end}}
+    </div>
+    <button class="btn success huge" type="submit">{{.T "tourn.start"}}</button>
+    {{else}}
+    <p class="muted">{{.T "common.no_players"}}</p>
+    {{end}}
+  </form>
+{{else}}
+  {{/* ---- Running / finished: standings + rounds ---- */}}
+  {{if eq .Tournament.Status "finished"}}
+    {{if .Standings}}<div class="winner-banner">{{.T "tourn.finished_banner" (index .Standings 0).Name}}</div>{{end}}
+  {{end}}
+
+  <h2>{{.T "tourn.standings"}}</h2>
+  <div class="table-scroll">
+  <table>
+    <tr><th>{{.T "tourn.th.place"}}</th><th>{{.T "th.name"}}</th><th>{{.T "th.strength"}}</th><th>{{.T "tourn.th.score"}}</th><th>{{.T "tourn.th.wins"}}</th><th>{{.T "tourn.th.sos"}}</th></tr>
+    {{range .Standings}}
+    <tr>
+      <td>{{.Place}}{{if eq .Place 1}} 🏆{{end}}</td>
+      <td>{{.Name}}</td>
+      <td>{{.Rank}}</td>
+      <td><strong>{{printf "%.1f" .Score}}</strong></td>
+      <td>{{.Wins}}/{{.Played}}</td>
+      <td>{{printf "%.1f" .SOS}}</td>
+    </tr>
+    {{end}}
+  </table>
+  </div>
+
+  {{if .CanAdvance}}
+  <form action="/g/{{.Group.Slug}}/t/{{.Tournament.ID}}/next" method="post" style="margin:1.4rem 0">
+    {{if ge (index .Rounds 0).No .Tournament.Rounds}}
+      <button class="btn" type="submit">{{.T "tourn.finish"}}</button>
+    {{else}}
+      <button class="btn" type="submit">{{.T "tourn.next_round"}}</button>
+    {{end}}
+  </form>
+  {{end}}
+
+  <h2 style="margin-top:1.6rem">{{.T "tourn.rounds_heading"}}</h2>
+  {{range .Rounds}}
+  <div class="round">
+    <h3>
+      {{$.T "tourn.round" .No}}
+      {{if .Complete}}<span class="tag done">{{$.T "tourn.status.finished"}}</span>{{else}}<span class="tag open">{{$.T "tourn.status.running"}}</span>{{end}}
+    </h3>
+    {{range .Pairings}}
+      {{if .IsBye}}
+      <div class="board bye">
+        <span class="no"></span>
+        <span class="players"><span class="side">{{.BlackName}}</span> — <em class="muted">{{$.T "tourn.bye"}}</em></span>
+      </div>
+      {{else}}
+      <div class="board">
+        <span class="no">{{.Board}}</span>
+        <span class="players">
+          <span class="side {{if eq .Winner "black"}}win{{end}}">{{.BlackName}} <span class="stone">⚫ {{.BlackRank}}</span></span>
+          <span class="vs">{{$.T "tourn.vs"}}</span>
+          <span class="side {{if eq .Winner "white"}}win{{end}}">{{.WhiteName}} <span class="stone">⚪ {{.WhiteRank}}</span></span>
+          {{if gt .Handicap 0}}<span class="stone"> · {{$.T "tourn.vorgabe_label"}} {{.Handicap}}</span>{{end}}
+        </span>
+        {{if .Played}}
+          <span class="side win">🏆 {{if eq .Winner "black"}}{{.BlackName}}{{else}}{{.WhiteName}}{{end}}</span>
+        {{else}}
+          <span class="acts">
+            <form action="/g/{{$.Group.Slug}}/t/{{$.Tournament.ID}}/result" method="post">
+              <input type="hidden" name="pairing" value="{{.ID}}">
+              <input type="hidden" name="winner" value="black">
+              <button class="btn mini" type="submit">{{$.T "tourn.black_wins"}}</button>
+            </form>
+            <form action="/g/{{$.Group.Slug}}/t/{{$.Tournament.ID}}/result" method="post">
+              <input type="hidden" name="pairing" value="{{.ID}}">
+              <input type="hidden" name="winner" value="white">
+              <button class="btn mini ghost" type="submit">{{$.T "tourn.white_wins"}}</button>
+            </form>
+          </span>
+        {{end}}
+      </div>
+      {{end}}
+    {{end}}
+  </div>
+  {{end}}
+{{end}}
+{{end}}
+{{template "layout" .}}
