@@ -91,3 +91,49 @@ CREATE TABLE IF NOT EXISTS games (
 CREATE INDEX IF NOT EXISTS idx_games_group ON games(group_id);
 CREATE INDEX IF NOT EXISTS idx_games_black ON games(black_player_id);
 CREATE INDEX IF NOT EXISTS idx_games_white ON games(white_player_id);
+
+-- A tournament groups a set of players into a series of rounds. format is
+-- 'round_robin' or 'mcmahon'; handicap=1 means the games carry the
+-- recommended Vorgabe (so weaker players can win), 0 means even games.
+-- rounds is the planned round count (McMahon; round robin derives it).
+-- status walks 'setup' → 'running' → 'finished'.
+CREATE TABLE IF NOT EXISTS tournaments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    format      TEXT NOT NULL CHECK (format IN ('round_robin','mcmahon')),
+    handicap    INTEGER NOT NULL DEFAULT 1,
+    board_size  INTEGER NOT NULL DEFAULT 9,
+    rounds      INTEGER NOT NULL DEFAULT 0,
+    status      TEXT NOT NULL CHECK (status IN ('setup','running','finished')) DEFAULT 'setup',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tournaments_group ON tournaments(group_id);
+
+-- The roster of a tournament. start_score is the McMahon starting score
+-- (0 for round robin, where only wins count).
+CREATE TABLE IF NOT EXISTS tournament_players (
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    player_id     INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    start_score   REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (tournament_id, player_id)
+);
+
+-- One board of one round. white_player_id NULL means a bye for the black
+-- player (who then scores a win). winner is NULL until the result is in
+-- ('black' | 'white' | 'bye'). game_id links to the rating game that was
+-- recorded, so a result also moves the players' ratings.
+CREATE TABLE IF NOT EXISTS tournament_pairings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id   INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    round_no        INTEGER NOT NULL,
+    board_no        INTEGER NOT NULL,
+    black_player_id INTEGER REFERENCES players(id),
+    white_player_id INTEGER REFERENCES players(id),
+    handicap        INTEGER NOT NULL DEFAULT 0,
+    komi            REAL NOT NULL DEFAULT 6.5,
+    winner          TEXT CHECK (winner IN ('black','white','bye')),
+    game_id         INTEGER REFERENCES games(id),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pairings_tournament ON tournament_pairings(tournament_id, round_no);

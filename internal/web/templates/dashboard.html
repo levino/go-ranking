@@ -20,7 +20,10 @@
 <nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · {{.Group.Name}}</nav>
 <div class="dash-title">
   <h1>{{.Group.Name}}</h1>
-  <a class="btn" href="/g/{{.Group.Slug}}/play">{{.T "action.play"}}</a>
+  <span style="display:flex;gap:.6rem;flex-wrap:wrap">
+    <a class="btn ghost" href="/g/{{.Group.Slug}}/tournaments">🏆 {{.T "nav.tournaments"}}</a>
+    <a class="btn" href="/g/{{.Group.Slug}}/play">{{.T "action.play"}}</a>
+  </span>
 </div>
 
 <div class="row">

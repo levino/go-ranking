@@ -1,0 +1,99 @@
+{{define "content"}}
+<style>
+.tourn-list { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .7rem; }
+.tourn-list a {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  padding: 1rem 1.2rem; background: var(--paper-2); border: 1px solid var(--line);
+  border-radius: 14px; text-decoration: none; color: var(--ink); box-shadow: var(--shadow);
+}
+.tourn-list a:hover { border-color: var(--ink); transform: translateY(-1px); }
+.tourn-list .name { font-family: 'Fraunces', serif; font-weight: 700; font-size: 1.15rem; }
+.tourn-list .meta { color: var(--muted); font-size: .9rem; }
+.badge {
+  display: inline-block; padding: .15rem .55rem; border-radius: 999px;
+  font-size: .78rem; font-weight: 600; letter-spacing: .02em;
+}
+.badge.setup    { background: #fff3cd; color: #7a5c00; }
+.badge.running  { background: #d8eedf; color: #144d2b; }
+.badge.finished { background: #e5e1f5; color: #3b2e75; }
+.create-card {
+  background: var(--paper-2); border: 1px solid var(--line); border-radius: 18px;
+  box-shadow: var(--shadow); padding: 1.4rem 1.5rem; margin-top: 1rem;
+}
+.create-card .field { margin-bottom: 1rem; }
+.create-card label { display: block; font-weight: 600; margin-bottom: .3rem; }
+.create-card .hint { color: var(--muted); font-size: .85rem; font-weight: 400; }
+.create-card input[type=text], .create-card select, .create-card input[type=number] { width: 100%; }
+.create-card .inline { display: flex; gap: 1rem; flex-wrap: wrap; }
+.create-card .inline > * { flex: 1 1 140px; }
+.check-row { display: flex; align-items: center; gap: .5rem; }
+.check-row input { width: auto; }
+</style>
+
+<nav class="breadcrumb"><a href="/">{{.T "nav.start"}}</a> · <a href="/g/{{.Group.Slug}}">{{.Group.Name}}</a> · {{.T "nav.tournaments"}}</nav>
+<h1>{{.T "nav.tournaments"}}</h1>
+
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+
+{{if .Tournaments}}
+<ul class="tourn-list">
+  {{range .Tournaments}}
+  <li>
+    <a href="/g/{{$.Group.Slug}}/t/{{.ID}}">
+      <span>
+        <span class="name">{{.Name}}</span><br>
+        <span class="meta">
+          {{if eq .Format "mcmahon"}}McMahon{{else}}{{$.T "tourn.format.rr"}}{{end}}
+          · {{.BoardSize}} · {{if .Handicap}}{{$.T "tourn.handicap_on"}}{{else}}{{$.T "tourn.handicap_off"}}{{end}}
+        </span>
+      </span>
+      <span class="badge {{.Status}}">
+        {{if eq .Status "setup"}}{{$.T "tourn.status.setup"}}{{else if eq .Status "running"}}{{$.T "tourn.status.running"}}{{else}}{{$.T "tourn.status.finished"}}{{end}}
+      </span>
+    </a>
+  </li>
+  {{end}}
+</ul>
+{{else}}
+<p class="muted">{{.T "tourn.none"}}</p>
+{{end}}
+
+<h2 style="margin-top:2rem">{{.T "tourn.new"}}</h2>
+<form class="create-card" action="/g/{{.Group.Slug}}/tournaments" method="post">
+  <div class="field">
+    <label for="name">{{.T "tourn.name"}}</label>
+    <input type="text" id="name" name="name" placeholder="{{.T "tourn.name_ph"}}" required>
+  </div>
+  <div class="inline">
+    <div class="field">
+      <label for="format">{{.T "tourn.format"}}</label>
+      <select id="format" name="format">
+        <option value="round_robin">{{.T "tourn.format.rr"}}</option>
+        <option value="mcmahon">{{.T "tourn.format.mm"}}</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="board">{{.T "tourn.board"}}</label>
+      <select id="board" name="board">
+        <option value="9">9x9</option>
+        <option value="13">13x13</option>
+        <option value="19">19x19</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="rounds">{{.T "tourn.rounds"}}</label>
+      <input type="number" id="rounds" name="rounds" min="0" value="0">
+      <span class="hint">{{.T "tourn.rounds_hint"}}</span>
+    </div>
+  </div>
+  <div class="field">
+    <div class="check-row">
+      <input type="checkbox" id="handicap" name="handicap" checked>
+      <label for="handicap" style="margin:0">{{.T "tourn.handicap"}}</label>
+    </div>
+    <span class="hint">{{.T "tourn.handicap_hint"}}</span>
+  </div>
+  <button class="btn" type="submit">{{.T "tourn.create"}}</button>
+</form>
+{{end}}
+{{template "layout" .}}
