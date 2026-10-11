@@ -18,6 +18,8 @@ spec:
       labels:
         app.kubernetes.io/name: go-liga
     spec:
+      # Eigener User-Namespace: root im Container ist auf dem Host kein root.
+      hostUsers: false
       serviceAccountName: go-liga
       # ghcr.io/levino/go-ranking is a public image — no imagePullSecrets needed.
       securityContext:
