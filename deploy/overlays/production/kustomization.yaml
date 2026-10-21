@@ -10,4 +10,4 @@ resources:
 images:
 - name: ghcr.io/levino/go-ranking
   newName: ghcr.io/levino/go-ranking
-  newTag: 78a4672dc6c627c4dab8b0d60efbc052d65435e4
+  newTag: e8cffd240eb247c0249b1c9e49393f26d3587ab9
