@@ -60,6 +60,7 @@ var messages = map[string]map[Lang]string{
 
 	// ---- Dashboard ------------------------------------------------------
 	"dashboard.total_games": {DE: "Partien gesamt", EN: "Total games"},
+	"dashboard.refresh":     {DE: "Aktualisieren", EN: "Refresh"},
 	"dashboard.ranking":     {DE: "Rangliste", EN: "Ranking"},
 	"dashboard.recent":      {DE: "Letzte Partien", EN: "Recent games"},
 	"nav.players":           {DE: "Spieler", EN: "Players"},

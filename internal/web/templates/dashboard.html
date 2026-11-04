@@ -21,6 +21,7 @@
 <div class="dash-title">
   <h1>{{.Group.Name}}</h1>
   <span style="display:flex;gap:.6rem;flex-wrap:wrap">
+    <a class="btn ghost" href="/g/{{.Group.Slug}}" rel="nofollow">↻ {{.T "dashboard.refresh"}}</a>
     <a class="btn ghost" href="/g/{{.Group.Slug}}/tournaments">🏆 {{.T "nav.tournaments"}}</a>
     <a class="btn" href="/g/{{.Group.Slug}}/play">{{.T "action.play"}}</a>
   </span>

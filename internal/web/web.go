@@ -394,6 +394,9 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 		data.Path = r.URL.RequestURI()
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Dynamic pages must not be served from the browser cache (iPad/Safari
+	// back-forward cache otherwise shows stale counts and rankings).
+	w.Header().Set("Cache-Control", "no-store")
 	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render %s: %v", name, err)
 	}
@@ -600,6 +603,7 @@ func (s *Server) handleAdminsGET(w http.ResponseWriter, r *http.Request, g *stor
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *store.Group) {
 	players, _ := s.Service.Store.ListPlayers(r.Context(), g.ID, true)
 	games, _ := s.Service.Store.ListRecentGames(r.Context(), g.ID, 25)
+	total, _ := s.Service.Store.CountGames(r.Context(), g.ID)
 	pn := map[int64]string{}
 	for _, p := range players {
 		pn[p.ID] = p.Name
@@ -611,7 +615,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, g *stor
 		Players:     players,
 		RecentGames: games,
 		PlayerNames: pn,
-		GameCount:   len(games),
+		GameCount:   total,
 	})
 }
 
