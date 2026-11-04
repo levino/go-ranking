@@ -88,10 +88,21 @@ func HandicapAdjustment(player string, rating float64, stones int, board BoardSi
 // recommendation komi range: from the even-game komi down to a reverse
 // komi of -6.5; beyond that an extra stone is placed instead.
 const (
-	recKomiMax   = 6.5
-	recKomiMin   = -6.5
-	recMaxStones = 9
+	recKomiMax = 6.5
+	recKomiMin = -6.5
 )
+
+// MaxStones is the number of handicap stones that can actually be
+// placed on the board's star points: 9 on 19x19, but only 5 on 13x13
+// and 9x9 (four corner points plus tengen).
+func (b BoardSize) MaxStones() int {
+	switch b {
+	case Board9, Board13:
+		return 5
+	default:
+		return 9
+	}
+}
 
 // Recommended returns the suggested handicap for a pairing, derived by
 // inverting the OGS handicap formula: it finds the (stones, komi) whose
@@ -99,6 +110,8 @@ const (
 // absorbed by komi alone; a stone is added only once komi would leave
 // the playable range. This keeps 9x9 games finely graded — on 9x9 a
 // stone is worth six ranks, so komi carries roughly the first six.
+// Stones never exceed board.MaxStones(); a gap beyond that is carried
+// by additional reverse komi.
 func Recommended(stronger, weaker float64, board BoardSize) Handicap {
 	gap := RatingToRank(stronger) - RatingToRank(weaker)
 	if gap < 0 {
@@ -107,13 +120,17 @@ func Recommended(stronger, weaker float64, board BoardSize) Handicap {
 	// Target head start (in points): invert rankDiff = head*mult/stoneValue.
 	head := gap * stoneValue / boardMultiplier(board)
 
-	for _, stones := range []int{0, 2, 3, 4, 5, 6, 7, 8, 9} {
+	maxStones := board.MaxStones()
+	for stones := 0; stones <= maxStones; stones++ {
+		if stones == 1 {
+			continue // one stone is just "Black first, no komi"
+		}
 		numExtra := 0
 		if stones > 1 {
 			numExtra = stones - 1
 		}
 		komi := perfectKomi - head + stoneValue*float64(numExtra)
-		if komi >= recKomiMin || stones == recMaxStones {
+		if komi >= recKomiMin || stones == maxStones {
 			return Handicap{Stones: stones, Komi: NormalizeKomi(clamp(komi, -50, recKomiMax))}
 		}
 	}

@@ -189,7 +189,7 @@
         <div class="tune-label">{{.T "th.handicap"}}</div>
         <div class="tune-controls">
           <button type="button" class="tune-btn" onclick="bump('handicap',-1,0,9)">−</button>
-          <div class="tune-display"><input type="number" name="handicap" id="f-handicap" value="{{.Recommendation.Stones}}" min="0" max="9" step="1" inputmode="numeric"></div>
+          <div class="tune-display"><input type="number" name="handicap" id="f-handicap" value="{{.Recommendation.Stones}}" min="0" max="{{.Recommendation.Board.MaxStones}}" step="1" inputmode="numeric"></div>
           <button type="button" class="tune-btn" onclick="bump('handicap',1,0,9)">+</button>
         </div>
       </div>
