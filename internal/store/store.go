@@ -635,6 +635,13 @@ func (s *Store) ListRecentGames(ctx context.Context, groupID int64, limit int) (
 		   FROM games WHERE group_id=? ORDER BY played_at DESC LIMIT ?`, groupID, limit)
 }
 
+// CountGames returns the total number of games recorded for a group.
+func (s *Store) CountGames(ctx context.Context, groupID int64) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM games WHERE group_id=?`, groupID).Scan(&n)
+	return n, err
+}
+
 func (s *Store) ListGamesByPlayer(ctx context.Context, playerID int64) ([]Game, error) {
 	return s.queryGames(ctx,
 		`SELECT id,group_id,black_player_id,white_player_id,board_size,handicap,komi,winner,

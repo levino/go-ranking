@@ -227,3 +227,44 @@ func TestGroupAdminsMembership(t *testing.T) {
 		t.Fatalf("removal failed: %+v", admins)
 	}
 }
+
+// The dashboard's "Partien gesamt" must count all games, not just the
+// 25 most recent ones it lists.
+func TestCountGamesBeyondRecentLimit(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	g, _ := st.CreateGroup(ctx, "c", "C")
+	other, _ := st.CreateGroup(ctx, "o", "O")
+	p1, _ := st.CreatePlayer(ctx, g.ID, "P1", 1000)
+	p2, _ := st.CreatePlayer(ctx, g.ID, "P2", 1000)
+	q1, _ := st.CreatePlayer(ctx, other.ID, "Q1", 1000)
+	q2, _ := st.CreatePlayer(ctx, other.ID, "Q2", 1000)
+
+	rs := RatingState{Rating: 1000, Deviation: 200, Volatility: 0.06}
+	record := func(groupID, b, w int64) {
+		t.Helper()
+		gm := Game{GroupID: groupID, BlackPlayerID: b, WhitePlayerID: w,
+			BoardSize: rating.Board9, Komi: 6.5, Winner: "black",
+			BlackGoRBefore: 1000, WhiteGoRBefore: 1000, BlackGoRAfter: 1000, WhiteGoRAfter: 1000}
+		bc := CategoryRating{PlayerID: b, Category: "9x9", RatingState: rs}
+		wc := CategoryRating{PlayerID: w, Category: "9x9", RatingState: rs}
+		if _, err := st.RecordGame(ctx, gm, rs, rs, bc, wc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 30; i++ {
+		record(g.ID, p1.ID, p2.ID)
+	}
+	record(other.ID, q1.ID, q2.ID)
+
+	n, err := st.CountGames(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 30 {
+		t.Fatalf("CountGames = %d, want 30", n)
+	}
+	if recent, _ := st.ListRecentGames(ctx, g.ID, 25); len(recent) != 25 {
+		t.Fatalf("ListRecentGames = %d, want 25", len(recent))
+	}
+}
