@@ -180,3 +180,44 @@ func TestRecommendedKomiNeverWhole(t *testing.T) {
 		}
 	}
 }
+
+// 13x13 and 9x9 have only five star points for handicap stones (four
+// corners plus tengen); 19x19 has nine. Recommended must never ask for
+// more stones than the board can take — the rest goes into reverse komi.
+func TestRecommendedRespectsMaxStones(t *testing.T) {
+	cases := []struct {
+		board BoardSize
+		max   int
+	}{{Board9, 5}, {Board13, 5}, {Board19, 9}}
+	for _, c := range cases {
+		if got := c.board.MaxStones(); got != c.max {
+			t.Errorf("%s MaxStones = %d, want %d", c.board, got, c.max)
+		}
+		for d := 0.0; d < 3000; d += 10 {
+			if h := Recommended(1000+d, 1000, c.board); h.Stones > c.max {
+				t.Errorf("%s gap %.0f: %d stones, max is %d", c.board, d, h.Stones, c.max)
+			}
+		}
+	}
+}
+
+// On 13x13 a stone is worth three ranks (OGS board multiplier), so a
+// 12-rank gap needs 4–5 stones there but ~12 on 19x19 territory.
+func TestRecommended13x13StoneValue(t *testing.T) {
+	strong, weak := FromRankMust(t, "8k"), FromRankMust(t, "20k")
+	h := Recommended(strong, weak, Board13)
+	if h.Stones < 4 || h.Stones > 5 {
+		t.Errorf("13x13 12-rank gap: %d stones, want 4–5", h.Stones)
+	}
+	// Beyond the cap: 5 stones and the remainder as reverse komi that
+	// still neutralises the rank gap.
+	strong = FromRankMust(t, "1k")
+	h = Recommended(strong, weak, Board13)
+	gap := RatingToRank(strong) - RatingToRank(weak)
+	if h.Stones != 5 || h.Komi >= recKomiMin {
+		t.Errorf("13x13 19-rank gap: got %+v, want 5 stones + reverse komi", h)
+	}
+	if got := HandicapRankDifference(h.Stones, Board13, h.Komi); math.Abs(got-gap) > 0.5 {
+		t.Errorf("13x13 capped handicap covers %.2f ranks, gap is %.2f", got, gap)
+	}
+}

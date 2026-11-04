@@ -167,7 +167,7 @@
     {{if eq .Recommendation.Stones 0}}
       <div class="label">{{.T "result.even_label"}}</div>
       <div class="even-pill">{{.T "result.no_handicap"}}</div>
-      <div class="komi">{{.KomiText .Recommendation.Komi}}{{if lt .Recommendation.Komi 0.0}}{{.T "result.minus_points"}}{{end}}</div>
+      <div class="komi">{{.KomiText .Recommendation.Komi}}{{if lt .Recommendation.Komi 0.0}}{{.T "result.black_bonus"}}{{end}}</div>
     {{else}}
       <div class="label">{{.T "result.handicap_for_black"}}</div>
       <div class="num">{{.Recommendation.Stones}}<small>{{.T "result.stones"}}</small></div>

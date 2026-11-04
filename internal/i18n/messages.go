@@ -127,7 +127,7 @@ var messages = map[string]map[Lang]string{
 	"result.white_plays":        {DE: "Weiß spielt", EN: "White plays"},
 	"result.even_label":         {DE: "Ebenes Spiel", EN: "Even game"},
 	"result.no_handicap":        {DE: "Keine Vorgabe", EN: "No handicap"},
-	"result.minus_points":       {DE: " — Schwarz bekommt am Ende Punkte abgezogen", EN: " — Black has points deducted at the end"},
+	"result.black_bonus":        {DE: " — diese Punkte bekommt Schwarz am Ende dazu", EN: " — Black receives these points at the end"},
 	"result.handicap_for_black": {DE: "Vorgabe für Schwarz", EN: "Handicap for Black"},
 	"result.stones":             {DE: "Steine", EN: "stones"},
 	"result.record_result":      {DE: "Ergebnis eintragen", EN: "Record result"},
