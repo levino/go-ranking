@@ -132,6 +132,54 @@ func toolDefs() []Tool {
 				"required": []string{"group", "black", "white", "board", "handicap", "winner"},
 			},
 		},
+		{
+			Name: "list_games",
+			Description: "Listet die zuletzt eingetragenen Partien einer Gruppe (neueste zuerst) mit ihrer ID. " +
+				"Die ID braucht man für delete_game. Zeigt pro Partie, ob sie noch gelöscht werden kann.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"group":  map[string]any{"type": "string"},
+					"player": map[string]any{"type": "string", "description": "Optional: nur Partien dieses Spielers."},
+					"limit":  map[string]any{"type": "integer", "description": "Optional, Default 20, max. 100."},
+				},
+				"required": []string{"group"},
+			},
+			Annotations: &ToolAnnotations{
+				Title:          "Partien auflisten",
+				ReadOnlyHint:   boolPtr(true),
+				IdempotentHint: boolPtr(true),
+				OpenWorldHint:  boolPtr(false),
+			},
+		},
+		{
+			Name: "delete_game",
+			Description: "DESTRUKTIV — löscht eine eingetragene Partie endgültig (kein Undo). Gedacht zum Korrigieren " +
+				"von Fehleingaben (falscher Sieger, falsche Spieler, doppelt eingetragen). Nur innerhalb von 14 Tagen " +
+				"nach dem Eintragen möglich; Turnierpartien können hier nicht gelöscht werden. Beim Löschen wird die " +
+				"gesamte Partiehistorie der Gruppe ohne diese Partie neu durchgerechnet — dadurch ändern sich auch die " +
+				"Ratings aller Spieler, die danach gespielt haben. " +
+				"Ablauf in zwei Schritten: Erst OHNE confirm aufrufen — das ändert nichts und liefert eine Vorschau " +
+				"(Partie + Rating-Änderungen). Diese Vorschau dem Nutzer zeigen und ausdrücklich fragen, ob wirklich " +
+				"gelöscht werden soll. Nur wenn der Nutzer zustimmt, erneut mit confirm=true aufrufen. Niemals confirm=true " +
+				"ohne vorherige Zustimmung des Nutzers setzen. Partie-ID über list_games ermitteln.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"group":   map[string]any{"type": "string"},
+					"game_id": map[string]any{"type": "integer", "description": "ID der Partie aus list_games."},
+					"confirm": map[string]any{"type": "boolean", "description": "Erst nach ausdrücklicher Zustimmung des Nutzers auf true setzen. Fehlt es oder ist es false, wird nur die Vorschau geliefert."},
+				},
+				"required": []string{"group", "game_id"},
+			},
+			Annotations: &ToolAnnotations{
+				Title:           "Partie löschen",
+				ReadOnlyHint:    boolPtr(false),
+				DestructiveHint: boolPtr(true),
+				IdempotentHint:  boolPtr(false),
+				OpenWorldHint:   boolPtr(false),
+			},
+		},
 	}
 }
 
@@ -157,6 +205,10 @@ func (s *Server) callTool(ctx context.Context, p ToolCallParams) (*ToolCallResul
 		return s.toolRecommend(ctx, p.Arguments)
 	case "record_game":
 		return s.toolRecordGame(ctx, p.Arguments)
+	case "list_games":
+		return s.toolListGames(ctx, p.Arguments)
+	case "delete_game":
+		return s.toolDeleteGame(ctx, p.Arguments)
 	}
 	return nil, fmt.Errorf("unknown tool: %s", p.Name)
 }

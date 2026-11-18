@@ -57,10 +57,25 @@ type ServerInfo struct {
 }
 
 type Tool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	InputSchema map[string]any   `json:"inputSchema"`
+	Annotations *ToolAnnotations `json:"annotations,omitempty"`
 }
+
+// ToolAnnotations are the MCP behaviour hints (spec 2025-03-26). Clients
+// such as Claude.ai use destructiveHint to ask the user before calling.
+// Booleans are pointers so an unset hint is omitted rather than sent as
+// false (the spec's defaults differ per hint).
+type ToolAnnotations struct {
+	Title           string `json:"title,omitempty"`
+	ReadOnlyHint    *bool  `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool  `json:"destructiveHint,omitempty"`
+	IdempotentHint  *bool  `json:"idempotentHint,omitempty"`
+	OpenWorldHint   *bool  `json:"openWorldHint,omitempty"`
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 type ToolsListResult struct {
 	Tools []Tool `json:"tools"`

@@ -28,6 +28,8 @@ Es gibt keine API-Keys, keine Bearer-Tokens, die du irgendwo eintippen musst. Di
 | `ranking` | Sortierte Rangliste. |
 | `recommend_handicap` | Für zwei Spieler + Brett: Empfehlung Steine/Komi und wer Schwarz spielt. |
 | `record_game` | Partie eintragen. Vorgabe und Komi werden als Werte übergeben (Komi darf negativ sein). |
+| `list_games` | Letzte Partien mit ID, optional gefiltert nach Spieler; zeigt, ob eine Partie noch löschbar ist. |
+| `delete_game` | **Destruktiv.** Fehleingabe löschen — nur mit ausdrücklicher Bestätigung, siehe unten. |
 
 ## Was passiert pro Tool-Call?
 
@@ -58,6 +60,25 @@ Auf 9×9 mit Rückkomi statt Vorgabe:
 
 ```
 record_game  group="go-ag-hannover"  black="Anna"  white="Ben"  board="9"  handicap="0"  komi="-3.5"  winner="white"
+```
+
+## Partie löschen
+
+`delete_game` ist zum Korrigieren von Fehleingaben gedacht (falscher Sieger, falsche Spieler, doppelt eingetragen) und als destruktive Aktion markiert (`destructiveHint`), damit der KI-Client vor dem Aufruf nachfragt. Zusätzlich arbeitet das Tool zweistufig:
+
+1. Aufruf **ohne** `confirm` ändert nichts und liefert eine Vorschau: die Partie und wie sich die Ratings der betroffenen Spieler ändern würden.
+2. Erst ein zweiter Aufruf mit `confirm=true` löscht — und zwar nur, nachdem der Mensch der Vorschau ausdrücklich zugestimmt hat.
+
+Regeln:
+
+- **Zeitfenster 14 Tage** ab dem Eintragen. Das reicht, um einen Tippfehler noch beim nächsten wöchentlichen Treffen zu korrigieren. Ältere Partien gehören zur abgeschlossenen Historie — sie zu löschen würde unbemerkt alle Ratings verschieben, die seither darauf aufgebaut haben.
+- **Turnierpartien** lassen sich hier nicht löschen, sonst stimmen Paarungen und Turniertabelle nicht mehr.
+- **Was beim Löschen passiert:** Die Partie wird endgültig entfernt und die komplette Partiehistorie der Gruppe ohne sie neu durchgerechnet (in einer Transaktion). Danach sind alle Ratings — auch die von Spielern, die erst später gespielt haben — genau so, als wäre die Partie nie eingetragen worden. Es gibt kein Undo: Neu eintragen setzt die Partie ans Ende der Historie, nicht an ihren alten Platz.
+
+```
+list_games   group="go-ag-hannover"  player="Ben"
+delete_game  group="go-ag-hannover"  game_id=42                  # Vorschau
+delete_game  group="go-ag-hannover"  game_id=42  confirm=true    # nach Zustimmung
 ```
 
 ## Wenn etwas schief geht
