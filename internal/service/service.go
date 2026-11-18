@@ -16,6 +16,16 @@ import (
 
 type Service struct {
 	Store *store.Store
+	// Now is the clock used for time-bound rules (the game deletion
+	// window). Nil means time.Now; tests override it.
+	Now func() time.Time
+}
+
+func (s *Service) CurrentTime() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 func New(s *store.Store) *Service { return &Service{Store: s} }
@@ -175,7 +185,15 @@ func (s *Service) RecomputeGroup(ctx context.Context, groupID int64) error {
 	if err != nil {
 		return err
 	}
+	outPlayers, outCats := replay(players, games)
+	return s.Store.SaveRecompute(ctx, groupID, outPlayers, outCats, games)
+}
 
+// replay runs games (oldest first) through the OGS engine starting from
+// every player's seed. It rewrites the games' before/after snapshots in
+// place and returns the players with their resulting overall rating plus
+// the full per-board category grid. Pure — touches no storage.
+func replay(players []store.Player, games []store.Game) ([]store.Player, []store.CategoryRating) {
 	overall := map[int64]rating.Glicko2Entry{}
 	seed := map[int64]float64{}
 	for _, p := range players {
@@ -224,7 +242,7 @@ func (s *Service) RecomputeGroup(ctx context.Context, groupID int64) error {
 			RatingState: entryState(e, catGames[k]),
 		})
 	}
-	return s.Store.SaveRecompute(ctx, groupID, outPlayers, outCats, games)
+	return outPlayers, outCats
 }
 
 // DefaultKomi exposes the conventional komi for a given handicap so

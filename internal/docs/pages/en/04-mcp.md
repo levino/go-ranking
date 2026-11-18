@@ -28,6 +28,8 @@ There are no API keys, no bearer tokens you have to type in anywhere. The authen
 | `ranking` | Sorted ranking. |
 | `recommend_handicap` | For two players + board: recommendation of stones/komi and who plays Black. |
 | `record_game` | Record a game. Handicap and komi are passed as values (komi may be negative). |
+| `list_games` | Recent games with their ID, optionally filtered by player; shows whether a game can still be deleted. |
+| `delete_game` | **Destructive.** Delete a mis-entered game — only with explicit confirmation, see below. |
 
 ## What happens per tool call?
 
@@ -58,6 +60,26 @@ On 9×9 with reverse komi instead of a handicap:
 
 ```
 record_game  group="go-ag-hannover"  black="Anna"  white="Ben"  board="9"  handicap="0"  komi="-3.5"  winner="white"
+```
+
+
+## Deleting a game
+
+`delete_game` is meant for correcting mistakes (wrong winner, wrong players, entered twice). It is annotated as destructive (`destructiveHint`) so the AI client asks before calling it, and it works in two steps:
+
+1. A call **without** `confirm` changes nothing and returns a preview: the game and how the affected players' ratings would change.
+2. Only a second call with `confirm=true` deletes — and only after the human has explicitly agreed to the preview.
+
+Rules:
+
+- **14-day window** from when the game was recorded — enough to fix a typo at the next weekly session. Older games are settled history; deleting one would silently shift every rating built on top of it since.
+- **Tournament games** cannot be deleted here, or pairings and standings would no longer add up.
+- **What deleting does:** the game is removed for good and the group's entire game history is replayed without it (in one transaction). Afterwards every rating — including those of players who only played later — is exactly as if the game had never been recorded. There is no undo: re-recording puts the game at the end of the history, not back in its old place.
+
+```
+list_games   group="go-ag-hannover"  player="Ben"
+delete_game  group="go-ag-hannover"  game_id=42                  # preview
+delete_game  group="go-ag-hannover"  game_id=42  confirm=true    # after consent
 ```
 
 ## When something goes wrong

@@ -248,3 +248,80 @@ func TestBatchRequestReturnsArray(t *testing.T) {
 		t.Fatalf("expected 2 responses, got %d", len(arr))
 	}
 }
+
+func callToolText(t *testing.T, s *Server, tok, name string, args map[string]any) (string, bool) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+		"params": map[string]any{"name": name, "arguments": args},
+	})
+	w := withAuth(t, s.Handler(), string(body), tok)
+	var resp struct {
+		Result ToolCallResult `json:"result"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("%s: %v (%s)", name, err, w.Body.String())
+	}
+	if len(resp.Result.Content) == 0 {
+		t.Fatalf("%s: empty result: %s", name, w.Body.String())
+	}
+	return resp.Result.Content[0].Text, resp.Result.IsError
+}
+
+func TestDeleteGameIsAnnotatedDestructive(t *testing.T) {
+	for _, tool := range toolDefs() {
+		if tool.Name != "delete_game" {
+			continue
+		}
+		a := tool.Annotations
+		if a == nil || a.DestructiveHint == nil || !*a.DestructiveHint || a.ReadOnlyHint == nil || *a.ReadOnlyHint {
+			t.Fatalf("delete_game must be annotated destructive, got %+v", a)
+		}
+		return
+	}
+	t.Fatal("delete_game not in tools/list")
+}
+
+func TestDeleteGameNeedsConfirm(t *testing.T) {
+	s, u, _ := newTestServer(t)
+	tok := mintToken(t, s, u)
+	ctx := context.Background()
+	callToolText(t, s, tok, "create_group", map[string]any{"slug": "klub", "name": "Klub"})
+	callToolText(t, s, tok, "add_player", map[string]any{"group": "klub", "name": "Anna", "rank": "10k"})
+	callToolText(t, s, tok, "add_player", map[string]any{"group": "klub", "name": "Ben", "rank": "12k"})
+	if txt, isErr := callToolText(t, s, tok, "record_game", map[string]any{
+		"group": "klub", "black": "Ben", "white": "Anna", "board": "9", "handicap": 0, "winner": "black",
+	}); isErr {
+		t.Fatal(txt)
+	}
+	g, _ := s.Service.Store.GroupBySlug(ctx, "klub")
+	games, _ := s.Service.Store.ListRecentGames(ctx, g.ID, 1)
+	id := games[0].ID
+
+	list, _ := callToolText(t, s, tok, "list_games", map[string]any{"group": "klub"})
+	if !strings.Contains(list, fmt.Sprintf("#%d", id)) || !strings.Contains(list, "löschbar bis") {
+		t.Fatalf("list_games: %s", list)
+	}
+
+	preview, isErr := callToolText(t, s, tok, "delete_game", map[string]any{"group": "klub", "game_id": id})
+	if isErr || !strings.Contains(preview, "VORSCHAU") || !strings.Contains(preview, "confirm=true") {
+		t.Fatalf("preview: %s", preview)
+	}
+	if n, _ := s.Service.Store.CountGames(ctx, g.ID); n != 1 {
+		t.Fatal("preview must not delete")
+	}
+
+	done, isErr := callToolText(t, s, tok, "delete_game", map[string]any{"group": "klub", "game_id": id, "confirm": true})
+	if isErr || !strings.Contains(done, "Gelöscht") {
+		t.Fatalf("delete: %s", done)
+	}
+	if n, _ := s.Service.Store.CountGames(ctx, g.ID); n != 0 {
+		t.Fatal("game still there after confirm")
+	}
+	for _, name := range []string{"Anna", "Ben"} {
+		p, _ := s.Service.Store.PlayerByGroupAndName(ctx, g.ID, name)
+		if p.GoR != p.SeedRating {
+			t.Errorf("%s: rating %.2f, want seed %.2f after deleting the only game", name, p.GoR, p.SeedRating)
+		}
+	}
+}

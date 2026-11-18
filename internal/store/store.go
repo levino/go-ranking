@@ -21,6 +21,10 @@ var schemaSQL string
 // ErrNotFound is returned when a lookup yields no rows.
 var ErrNotFound = errors.New("not found")
 
+// ErrConcurrentChange means the data changed while an operation was
+// being prepared; the caller should simply retry.
+var ErrConcurrentChange = errors.New("group changed concurrently, please retry")
+
 type Store struct {
 	DB *sql.DB
 }
@@ -602,6 +606,54 @@ func (s *Store) SaveRecompute(ctx context.Context, groupID int64, players []Play
 		return err
 	}
 	defer tx.Rollback()
+	if err := saveRecomputeTx(ctx, tx, groupID, players, cats, games); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteGameWithRecompute removes one game of a group and persists the
+// ratings recompute of the remaining history in the same transaction,
+// so the ratings never reflect a half-deleted state. games must be the
+// group's history WITHOUT the deleted game, already replayed.
+func (s *Store) DeleteGameWithRecompute(ctx context.Context, groupID, gameID int64, players []Player, cats []CategoryRating, games []Game) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `DELETE FROM games WHERE id=? AND group_id=?`, gameID, groupID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrNotFound
+	}
+	// The recompute was computed outside this transaction. If a game was
+	// recorded meanwhile, saving it would clobber that game's ratings.
+	var left int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM games WHERE group_id=?`, groupID).Scan(&left); err != nil {
+		return err
+	}
+	if left != len(games) {
+		return ErrConcurrentChange
+	}
+	if err := saveRecomputeTx(ctx, tx, groupID, players, cats, games); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// GameInTournament reports whether a game was recorded as the result of
+// a tournament pairing.
+func (s *Store) GameInTournament(ctx context.Context, gameID int64) (bool, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tournament_pairings WHERE game_id=?`, gameID).Scan(&n)
+	return n > 0, err
+}
+
+func saveRecomputeTx(ctx context.Context, tx *sql.Tx, groupID int64, players []Player, cats []CategoryRating, games []Game) error {
 	for _, p := range players {
 		if err := updatePlayerOverall(ctx, tx, p.ID,
 			RatingState{Rating: p.GoR, Deviation: p.Deviation, Volatility: p.Volatility}); err != nil {
@@ -625,7 +677,7 @@ func (s *Store) SaveRecompute(ctx context.Context, groupID int64, players []Play
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) ListRecentGames(ctx context.Context, groupID int64, limit int) ([]Game, error) {
