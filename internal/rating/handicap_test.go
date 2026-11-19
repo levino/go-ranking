@@ -113,7 +113,7 @@ func TestParseBoardSize(t *testing.T) {
 }
 
 func TestFromRankRoundtrip(t *testing.T) {
-	for _, rk := range []string{"30k", "20k", "15k", "10k", "1k", "1d", "5d"} {
+	for _, rk := range []string{"40k", "35k", "31k", "30k", "20k", "15k", "10k", "1k", "1d", "5d"} {
 		r, err := FromRank(rk)
 		if err != nil {
 			t.Fatalf("FromRank(%q): %v", rk, err)
@@ -219,5 +219,31 @@ func TestRecommended13x13StoneValue(t *testing.T) {
 	}
 	if got := HandicapRankDifference(h.Stones, Board13, h.Komi); math.Abs(got-gap) > 0.5 {
 		t.Errorf("13x13 capped handicap covers %.2f ranks, gap is %.2f", got, gap)
+	}
+}
+
+// Ratings below 30k keep showing distinct grades down to 40k, and are
+// capped there.
+func TestFormatRankBelow30k(t *testing.T) {
+	cases := []struct {
+		rating float64
+		want   string
+	}{
+		{525, "30k"},
+		{455, "33k"},
+		{352, "39k"},
+		{RankToRating(-10), "40k"},
+		{150, "40k"},
+	}
+	for _, c := range cases {
+		if got := FormatRank(c.rating); got != c.want {
+			t.Errorf("FormatRank(%v) = %q, want %q", c.rating, got, c.want)
+		}
+	}
+	if got := FormatRankPrecise(150); got != "40.0k" {
+		t.Errorf("FormatRankPrecise(150) = %q, want 40.0k", got)
+	}
+	if r, _ := FromRank("50k"); !approx(r, RankToRating(-10)) {
+		t.Errorf("FromRank(50k) = %v, want capped at 40k", r)
 	}
 }

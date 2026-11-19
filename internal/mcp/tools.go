@@ -60,7 +60,7 @@ func toolDefs() []Tool {
 				"properties": map[string]any{
 					"group": map[string]any{"type": "string"},
 					"name":  map[string]any{"type": "string"},
-					"rank":  map[string]any{"type": "string", "description": "Optional, z.B. '15k' oder '3d'. Default '30k'."},
+					"rank":  map[string]any{"type": "string", "description": "Optional, geschätzter Startrang, z.B. '15k' oder '3d' (bis '40k'). Default '30k'."},
 				},
 				"required": []string{"group", "name"},
 			},
