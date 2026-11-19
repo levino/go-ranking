@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/levino/go-ranking/internal/rating"
@@ -195,5 +197,79 @@ func TestRecordGameNormalizesKomi(t *testing.T) {
 	}
 	if gm.Komi == math.Trunc(gm.Komi) {
 		t.Errorf("recorded whole-number komi %.1f — draws would be possible", gm.Komi)
+	}
+}
+
+// TestRecordGameConcurrentNoLostUpdate records many games at once that
+// all involve the same player (as two tablets entering results at the
+// same time would). Every game must build on the rating the previous
+// one left: each game's "before" equals the prior game's "after", the
+// player's stored rating equals the last game's "after", and a full
+// recompute reproduces exactly the incrementally stored ratings.
+func TestRecordGameConcurrentNoLostUpdate(t *testing.T) {
+	svc := newSvc(t)
+	ctx := context.Background()
+	g, _ := svc.CreateGroup(ctx, "Group")
+	hub, _ := svc.Store.CreatePlayer(ctx, g.ID, "Hub", 1000)
+	var others []int64
+	for i := 0; i < 4; i++ {
+		p, _ := svc.Store.CreatePlayer(ctx, g.ID, fmt.Sprintf("P%d", i), 600+float64(i)*100)
+		others = append(others, p.ID)
+	}
+
+	const n = 40
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := svc.RecordGame(ctx, g.ID, others[i%len(others)], hub.ID, rating.Board9, 0, math.NaN(), i%3 == 0)
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	games, err := svc.Store.ListGamesByGroupAsc(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(games) != n {
+		t.Fatalf("games = %d, want %d", len(games), n)
+	}
+	last := map[int64]float64{}
+	check := func(gameID, pid int64, before, after float64) {
+		if prev, ok := last[pid]; ok && math.Abs(prev-before) > 1e-9 {
+			t.Errorf("game %d, player %d: before %.4f != previous after %.4f (lost update)", gameID, pid, before, prev)
+		}
+		last[pid] = after
+	}
+	for _, gm := range games {
+		check(gm.ID, gm.BlackPlayerID, gm.BlackGoRBefore, gm.BlackGoRAfter)
+		check(gm.ID, gm.WhitePlayerID, gm.WhiteGoRBefore, gm.WhiteGoRAfter)
+	}
+
+	stored, _ := svc.Store.ListPlayers(ctx, g.ID, true)
+	want := map[int64]float64{}
+	for _, p := range stored {
+		want[p.ID] = p.GoR
+		if a, ok := last[p.ID]; ok && math.Abs(a-p.GoR) > 1e-9 {
+			t.Errorf("player %s: stored %.4f != last game after %.4f", p.Name, p.GoR, a)
+		}
+	}
+	if err := svc.RecomputeGroup(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	re, _ := svc.Store.ListPlayers(ctx, g.ID, true)
+	for _, p := range re {
+		if math.Abs(p.GoR-want[p.ID]) > 1e-6 {
+			t.Errorf("player %s: recompute %.4f != stored %.4f", p.Name, p.GoR, want[p.ID])
+		}
 	}
 }

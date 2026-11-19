@@ -100,68 +100,67 @@ func (s *Service) RecordGame(ctx context.Context, groupID, blackID, whiteID int6
 	if blackID == whiteID {
 		return nil, errors.New("black and white must differ")
 	}
-	black, err := s.Store.PlayerByID(ctx, blackID)
-	if err != nil {
-		return nil, fmt.Errorf("black: %w", err)
-	}
-	white, err := s.Store.PlayerByID(ctx, whiteID)
-	if err != nil {
-		return nil, fmt.Errorf("white: %w", err)
-	}
-	if black.GroupID != groupID || white.GroupID != groupID {
-		return nil, errors.New("players are not in this group")
-	}
 	if isNaN(komi) {
 		komi = defaultKomi(stones)
 	}
 	// Komi must be a half-integer — a whole number would allow a draw,
 	// which go-liga cannot record.
 	komi = rating.NormalizeKomi(komi)
-
 	category := board.String()
-	blackCat, blackCatGames := s.loadCategory(ctx, black, category)
-	whiteCat, whiteCatGames := s.loadCategory(ctx, white, category)
 
-	blackOverall := rating.NewGlicko2Entry(black.GoR, black.Deviation, black.Volatility)
-	whiteOverall := rating.NewGlicko2Entry(white.GoR, white.Deviation, white.Volatility)
+	// The ratings are read and written in one transaction, so two games
+	// entered at the same time for the same player cannot overwrite each
+	// other's rating change.
+	return s.Store.RecordGameWith(ctx, blackID, whiteID, category, func(in store.GameInputs) (store.GameResult, error) {
+		black, white := in.Black, in.White
+		if black.GroupID != groupID || white.GroupID != groupID {
+			return store.GameResult{}, errors.New("players are not in this group")
+		}
+		blackCat, blackCatGames := categoryEntry(&black, in.BlackCat)
+		whiteCat, whiteCatGames := categoryEntry(&white, in.WhiteCat)
 
-	nbO, nwO, nbC, nwC := rating.RateGame(blackOverall, whiteOverall, blackCat, whiteCat,
-		rating.GameSetup{Board: board, Stones: stones, Komi: komi, BlackWon: blackWon})
+		blackOverall := rating.NewGlicko2Entry(black.GoR, black.Deviation, black.Volatility)
+		whiteOverall := rating.NewGlicko2Entry(white.GoR, white.Deviation, white.Volatility)
 
-	winner := "black"
-	if !blackWon {
-		winner = "white"
-	}
-	g := store.Game{
-		GroupID:        groupID,
-		BlackPlayerID:  blackID,
-		WhitePlayerID:  whiteID,
-		BoardSize:      board,
-		Handicap:       stones,
-		Komi:           komi,
-		Winner:         winner,
-		BlackGoRBefore: blackOverall.Rating,
-		WhiteGoRBefore: whiteOverall.Rating,
-		BlackGoRAfter:  nbO.Rating,
-		WhiteGoRAfter:  nwO.Rating,
-	}
-	return s.Store.RecordGame(ctx, g,
-		entryState(nbO, 0), entryState(nwO, 0),
-		store.CategoryRating{PlayerID: blackID, Category: category, RatingState: entryState(nbC, blackCatGames+1)},
-		store.CategoryRating{PlayerID: whiteID, Category: category, RatingState: entryState(nwC, whiteCatGames+1)},
-	)
+		nbO, nwO, nbC, nwC := rating.RateGame(blackOverall, whiteOverall, blackCat, whiteCat,
+			rating.GameSetup{Board: board, Stones: stones, Komi: komi, BlackWon: blackWon})
+
+		winner := "black"
+		if !blackWon {
+			winner = "white"
+		}
+		return store.GameResult{
+			Game: store.Game{
+				GroupID:        groupID,
+				BlackPlayerID:  blackID,
+				WhitePlayerID:  whiteID,
+				BoardSize:      board,
+				Handicap:       stones,
+				Komi:           komi,
+				Winner:         winner,
+				BlackGoRBefore: blackOverall.Rating,
+				WhiteGoRBefore: whiteOverall.Rating,
+				BlackGoRAfter:  nbO.Rating,
+				WhiteGoRAfter:  nwO.Rating,
+			},
+			BlackOverall: entryState(nbO, 0),
+			WhiteOverall: entryState(nwO, 0),
+			BlackCat:     store.CategoryRating{PlayerID: blackID, Category: category, RatingState: entryState(nbC, blackCatGames+1)},
+			WhiteCat:     store.CategoryRating{PlayerID: whiteID, Category: category, RatingState: entryState(nwC, whiteCatGames+1)},
+		}, nil
+	})
 }
 
 func entryState(e rating.Glicko2Entry, games int) store.RatingState {
 	return store.RatingState{Rating: e.Rating, Deviation: e.Deviation, Volatility: e.Volatility, Games: games}
 }
 
-// loadCategory returns the player's board-category Glicko-2 entry, plus
+// categoryEntry returns the player's board-category Glicko-2 entry, plus
 // the number of games already played in that category. A player with
-// no games in the category yet is seeded from their strength estimate.
-func (s *Service) loadCategory(ctx context.Context, p *store.Player, category string) (rating.Glicko2Entry, int) {
-	cr, err := s.Store.CategoryRating(ctx, p.ID, category)
-	if err != nil {
+// no games in the category yet (cr == nil) is seeded from their
+// strength estimate.
+func categoryEntry(p *store.Player, cr *store.CategoryRating) (rating.Glicko2Entry, int) {
+	if cr == nil {
 		return rating.NewGlicko2Entry(p.SeedRating, rating.DefaultDeviation, rating.DefaultVolatility), 0
 	}
 	return rating.NewGlicko2Entry(cr.Rating, cr.Deviation, cr.Volatility), cr.Games

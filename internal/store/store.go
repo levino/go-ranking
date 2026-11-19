@@ -528,14 +528,81 @@ func (s *Store) ListCategoryRatings(ctx context.Context, playerID int64) ([]Cate
 
 // RecordGame inserts a game and updates both players' ratings
 // atomically: the overall rating on the players row, and the board-size
-// category rating in player_ratings. The caller (service.RecordGame)
-// has already computed all new values.
+// category rating in player_ratings. The caller has already computed all
+// new values. Prefer RecordGameWith, which reads the inputs inside the
+// same transaction.
 func (s *Store) RecordGame(ctx context.Context, g Game, bOverall, wOverall RatingState, bCat, wCat CategoryRating) (*Game, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	return commitGame(ctx, tx, GameResult{Game: g, BlackOverall: bOverall, WhiteOverall: wOverall, BlackCat: bCat, WhiteCat: wCat})
+}
+
+// GameInputs is the rating state RecordGameWith reads inside its write
+// transaction. A nil category means the player has no games in that
+// board-size category yet.
+type GameInputs struct {
+	Black, White       Player
+	BlackCat, WhiteCat *CategoryRating
+}
+
+// GameResult is what the compute callback of RecordGameWith returns:
+// the game row to insert plus both players' new ratings.
+type GameResult struct {
+	Game                       Game
+	BlackOverall, WhiteOverall RatingState
+	BlackCat, WhiteCat         CategoryRating
+}
+
+// RecordGameWith reads both players' current ratings, lets compute turn
+// them into the new game and ratings, and writes the result — all in one
+// transaction. Reading inside the transaction is what prevents a lost
+// update: two games recorded at the same time for the same player would
+// otherwise both start from the same old rating, and the second write
+// would silently discard the first game's rating change.
+func (s *Store) RecordGameWith(ctx context.Context, blackID, whiteID int64, category string, compute func(GameInputs) (GameResult, error)) (*Game, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var in GameInputs
+	for _, x := range []struct {
+		id  int64
+		p   *Player
+		cat **CategoryRating
+	}{{blackID, &in.Black, &in.BlackCat}, {whiteID, &in.White, &in.WhiteCat}} {
+		p, err := scanPlayer(tx.QueryRowContext(ctx, `SELECT `+playerCols+` FROM players WHERE id=?`, x.id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("player %d: %w", x.id, ErrNotFound)
+		}
+		if err != nil {
+			return nil, err
+		}
+		*x.p = *p
+		cr := CategoryRating{PlayerID: x.id, Category: category}
+		err = tx.QueryRowContext(ctx,
+			`SELECT rating,deviation,volatility,games FROM player_ratings WHERE player_id=? AND category=?`,
+			x.id, category).Scan(&cr.Rating, &cr.Deviation, &cr.Volatility, &cr.Games)
+		switch {
+		case err == nil:
+			*x.cat = &cr
+		case !errors.Is(err, sql.ErrNoRows):
+			return nil, err
+		}
+	}
+	res, err := compute(in)
+	if err != nil {
+		return nil, err
+	}
+	return commitGame(ctx, tx, res)
+}
+
+// commitGame writes a computed game and its rating changes, then commits tx.
+func commitGame(ctx context.Context, tx *sql.Tx, r GameResult) (*Game, error) {
+	g := r.Game
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO games(group_id,black_player_id,white_player_id,board_size,handicap,komi,winner,
 		    black_gor_before,white_gor_before,black_gor_after,white_gor_after)
@@ -545,16 +612,16 @@ func (s *Store) RecordGame(ctx context.Context, g Game, bOverall, wOverall Ratin
 	if err != nil {
 		return nil, err
 	}
-	if err := updatePlayerOverall(ctx, tx, g.BlackPlayerID, bOverall); err != nil {
+	if err := updatePlayerOverall(ctx, tx, g.BlackPlayerID, r.BlackOverall); err != nil {
 		return nil, err
 	}
-	if err := updatePlayerOverall(ctx, tx, g.WhitePlayerID, wOverall); err != nil {
+	if err := updatePlayerOverall(ctx, tx, g.WhitePlayerID, r.WhiteOverall); err != nil {
 		return nil, err
 	}
-	if err := upsertCategory(ctx, tx, g.BlackPlayerID, bCat); err != nil {
+	if err := upsertCategory(ctx, tx, g.BlackPlayerID, r.BlackCat); err != nil {
 		return nil, err
 	}
-	if err := upsertCategory(ctx, tx, g.WhitePlayerID, wCat); err != nil {
+	if err := upsertCategory(ctx, tx, g.WhitePlayerID, r.WhiteCat); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
