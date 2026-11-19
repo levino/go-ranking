@@ -15,11 +15,18 @@ import (
 //	rank   = ln(rating / 525) * 23.15
 //
 // The continuous rank number follows the OGS convention: rank 0 = 30k,
-// rank 29 = 1k, rank 30 = 1d, rank 38 = 9d. This is why the system
-// reaches all the way down to 30 kyu — rank 0 is its natural floor.
+// rank 29 = 1k, rank 30 = 1d, rank 38 = 9d.
+//
+// OGS stops at 30k (rank 0), but beginner children regularly drop below
+// that. Ratings keep falling past 30k anyway, so the grade display
+// continues down to MaxKyu (rank -10) — otherwise a child far below
+// 30k would show "30k" no matter how many games they win.
 const (
 	ogsRankA = 525.0
 	ogsRankC = 23.15
+
+	// MaxKyu is the weakest grade shown and accepted (40k = rank -10).
+	MaxKyu = 40
 )
 
 // RankToRating maps an OGS continuous rank number to a rating.
@@ -36,7 +43,7 @@ func RatingToRank(rating float64) float64 {
 }
 
 // FromRank converts a kyu/dan grade like "15k" or "1d" into a rating.
-// Supported down to 30k (rank 0) — the OGS floor.
+// Supported down to MaxKyu (40k).
 func FromRank(s string) (float64, error) {
 	t := strings.ToLower(strings.TrimSpace(s))
 	if t == "" {
@@ -49,8 +56,8 @@ func FromRank(s string) (float64, error) {
 	}
 	switch last {
 	case 'k':
-		if num > 30 {
-			num = 30
+		if num > MaxKyu {
+			num = MaxKyu
 		}
 		return RankToRating(float64(30 - num)), nil
 	case 'd':
@@ -69,8 +76,8 @@ func FormatRank(rating float64) string {
 		return fmt.Sprintf("%dd", rank-29)
 	}
 	k := 30 - rank
-	if k > 30 {
-		k = 30
+	if k > MaxKyu {
+		k = MaxKyu
 	}
 	if k < 1 {
 		k = 1
@@ -86,8 +93,8 @@ func FormatRankPrecise(rating float64) string {
 		return fmt.Sprintf("%.1fd", rank-29)
 	}
 	k := 30 - rank
-	if k > 30 {
-		k = 30
+	if k > MaxKyu {
+		k = MaxKyu
 	}
 	return fmt.Sprintf("%.1fk", k)
 }

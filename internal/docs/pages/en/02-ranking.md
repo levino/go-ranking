@@ -26,7 +26,7 @@ r = 525 \cdot e^{\,\text{rank}/23{,}15}
 \text{rank} = \ln(r/525)\cdot 23{,}15
 $$
 
-The running rank number follows the OGS convention: **Rank 0 = 30 Kyu**, Rank 29 = 1 Kyu, Rank 30 = 1 Dan. That is why the scale reaches all the way down to **30 Kyu** — Rank 0 is its natural floor. Just right for beginner children.
+The running rank number follows the OGS convention: **Rank 0 = 30 Kyu**, Rank 29 = 1 Kyu, Rank 30 = 1 Dan. On OGS the scale ends at 30 Kyu. Beginner children often drop below that, and their rating keeps falling anyway. go-liga therefore shows grades down to **40 Kyu** (Rank −10), so progress stays visible down there too. New players still start at 30 Kyu unless a different estimate is given when they are added.
 
 The profile display shows the rank with one decimal place plus a $\pm$ that expresses the deviation in rank steps — e.g. `11,0k ± 1,5`.
 

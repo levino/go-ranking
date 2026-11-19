@@ -26,7 +26,7 @@ r = 525 \cdot e^{\,\text{Rang}/23{,}15}
 \text{Rang} = \ln(r/525)\cdot 23{,}15
 $$
 
-Die fortlaufende Rang-Nummer folgt der OGS-Konvention: **Rang 0 = 30 Kyu**, Rang 29 = 1 Kyu, Rang 30 = 1 Dan. Deshalb reicht die Skala bis **30 Kyu** hinunter — Rang 0 ist ihr natürlicher Boden. Für Anfänger-Kinder genau richtig.
+Die fortlaufende Rang-Nummer folgt der OGS-Konvention: **Rang 0 = 30 Kyu**, Rang 29 = 1 Kyu, Rang 30 = 1 Dan. Auf OGS endet die Skala bei 30 Kyu. Anfänger-Kinder rutschen aber oft darunter, und ihr Rating sinkt dann trotzdem weiter. go-liga zeigt die Ränge deshalb bis **40 Kyu** (Rang −10) an. So sieht man auch dort unten, dass sich etwas bewegt. Neue Spieler starten weiterhin bei 30 Kyu, wenn beim Anlegen nichts anderes angegeben wird.
 
 Die Profilanzeige zeigt den Rang mit einer Nachkommastelle plus ein $\pm$, das die Deviation in Rangstufen ausdrückt — z.B. `11,0k ± 1,5`.
 
